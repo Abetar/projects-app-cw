@@ -1,10 +1,12 @@
 @import "tailwindcss";
 
+/* 🎨 Paleta fija, sin cambiar por modo oscuro */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f3f4f6; /* gris clarito estilo bg-slate-100 */
+  --foreground: #0f172a; /* texto oscuro estilo text-slate-900 */
 }
 
+/* Mapeo para Tailwind (Next 15 / Tailwind v4) */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -12,12 +14,15 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/* ❌ Eliminamos por completo el media query de prefers-color-scheme */
+/*
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
   }
 }
+*/
 
 body {
   background: var(--background);
