@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { DynamicMetrics, MetricsRow } from "@/components/reporte/DynamicMetrics";
 import type { Proyecto } from "@/lib/airtable";
@@ -44,22 +45,16 @@ const PENDIENTE_OPCIONES = [
   "Otro",
 ];
 
+// ✅ Actividades ajustadas según comentarios
 const ACTIVIDADES_FABRICACION = [
   "Habilitado",
   "Corte",
   "Armado",
   "Ensamble",
   "Limpieza de piezas",
-  "Colocación de aluminio",
-  "Colocación de vidrio",
-  "Sellos interior",
-  "Sellos exterior",
-  "Accesorios",
-  "Prearmado en taller",
   "Perforado de piezas",
   "Rectificado / ajuste de piezas",
-  "Preparación de anclajes",
-  "Soldadura de elementos",
+  "Suministro de accesorios",
 ];
 
 const ACTIVIDADES_INSTALACION = [
@@ -72,16 +67,15 @@ const ACTIVIDADES_INSTALACION = [
   "Limpieza",
   "Nivelación y plomeo",
   "Fijación de anclajes",
-  "Sellado perimetral",
-  "Colocación de bastidores",
-  "Corrección de desalineaciones",
+  "Herrajes",
+  "Detalles y ajustes",
 ];
 
 const ACTIVIDADES_SUPERVISION = [
   "Revisión de calidad",
   "Revisión de avances",
   "Coordinación con contratista",
-  "Validación de metrado",
+  "Validación de alcances",
   "Supervisión general de frente",
   "Levantamiento de pendientes",
   "Verificación de seguridad en obra",
@@ -96,7 +90,7 @@ const MAX_FOTOS = 5;
 export default function ReportePage() {
   const router = useRouter();
 
-  // -------- SUPERVISOR / LOGIN ----------
+  // ---------------- SUPERVISOR / LOGIN ----------------
   const [supervisor, setSupervisor] = useState<SupervisorSession | null>(null);
 
   useEffect(() => {
@@ -104,24 +98,20 @@ export default function ReportePage() {
       const id = window.localStorage.getItem("cw_supervisor_id");
       const name = window.localStorage.getItem("cw_supervisor_name");
 
-      if (!id) {
+      if (!id || !name) {
         router.push("/supervisor");
         return;
       }
 
-      setSupervisor({
-        id,
-        name: name || "",
-      });
+      setSupervisor({ id, name });
     } catch {
       router.push("/supervisor");
     }
   }, [router]);
 
-  // -------- PROYECTOS ----------
+  // ---------------- PROYECTOS ----------------
   const [proyectos, setProyectos] = useState<Proyecto[]>([]);
   const [loadingProyectos, setLoadingProyectos] = useState(false);
-  const [proyectoId, setProyectoId] = useState("");
 
   useEffect(() => {
     const load = async () => {
@@ -139,19 +129,14 @@ export default function ReportePage() {
     load();
   }, []);
 
+  const [proyectoId, setProyectoId] = useState("");
   const selectedProyecto = proyectos.find((p) => p.id === proyectoId) ?? null;
 
-  // -------- FORM STATE ----------
+  // ---------------- FORM STATE ----------------
   const [fecha, setFecha] = useState("");
   const [area, setArea] = useState("");
 
-  // Fecha default hoy
-  useEffect(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    setFecha(today);
-  }, []);
-
-  // Actividades (3 grupos, estilo píldora)
+  // Actividades separadas por categoría
   const [actividadesFabricacion, setActividadesFabricacion] = useState<string[]>(
     []
   );
@@ -163,19 +148,21 @@ export default function ReportePage() {
   );
 
   const toggleActividad = (
-    tipo: "fabricacion" | "instalacion" | "supervision",
+    categoria: "fabricacion" | "instalacion" | "supervision",
     nombre: string
   ) => {
-    const updater =
-      tipo === "fabricacion"
-        ? setActividadesFabricacion
-        : tipo === "instalacion"
-        ? setActividadesInstalacion
-        : setActividadesSupervision;
+    const updater = (prev: string[]) =>
+      prev.includes(nombre)
+        ? prev.filter((a) => a !== nombre)
+        : [...prev, nombre];
 
-    updater((prev) =>
-      prev.includes(nombre) ? prev.filter((a) => a !== nombre) : [...prev, nombre]
-    );
+    if (categoria === "fabricacion") {
+      setActividadesFabricacion(updater);
+    } else if (categoria === "instalacion") {
+      setActividadesInstalacion(updater);
+    } else {
+      setActividadesSupervision(updater);
+    }
   };
 
   // Incidencias
@@ -200,33 +187,32 @@ export default function ReportePage() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
 
-  // -------- HANDLERS --------
+  // ---------------- HANDLERS ----------------
 
   async function handleUploadFotos(files: FileList | null) {
     if (!files || files.length === 0) return;
 
-    const remaining = MAX_FOTOS - fotoUrls.length;
-    if (remaining <= 0) {
-      setErrorMsg(`Solo puedes subir máximo ${MAX_FOTOS} fotos.`);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      return;
-    }
-
-    const toUpload = Array.from(files).slice(0, remaining);
+    const filesArray = Array.from(files).slice(0, MAX_FOTOS);
 
     setSubiendoFotos(true);
     setErrorMsg(null);
     setSuccessMsg(null);
 
-    const uploadPreset =
-      process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || "cw_uploads";
-    const cloudName =
-      process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || "cw-cloud";
-
     try {
       const urls: string[] = [];
+      const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+      const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
 
-      for (const file of toUpload) {
+      if (!uploadPreset || !cloudName) {
+        console.error("Cloudinary env vars faltantes");
+        setErrorMsg(
+          "Error de configuración al subir imágenes. Contacta al administrador."
+        );
+        setSubiendoFotos(false);
+        return;
+      }
+
+      for (const file of filesArray) {
         const formData = new FormData();
         formData.append("file", file);
         formData.append("upload_preset", uploadPreset);
@@ -268,8 +254,7 @@ export default function ReportePage() {
   }
 
   function resetForm() {
-    const today = new Date().toISOString().slice(0, 10);
-    setFecha(today);
+    setFecha("");
     setArea("");
     setProyectoId("");
     setActividadesFabricacion([]);
@@ -287,25 +272,20 @@ export default function ReportePage() {
     }
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!supervisor) return;
 
     setErrorMsg(null);
     setSuccessMsg(null);
 
+    // ---------------- VALIDACIÓN BONITA ----------------
     const missing: string[] = [];
 
     if (!fecha) missing.push("la fecha del día");
     if (!proyectoId) missing.push("el proyecto del día");
-    if (
-      actividadesFabricacion.length === 0 &&
-      actividadesInstalacion.length === 0 &&
-      actividadesSupervision.length === 0
-    ) {
-      missing.push("al menos una actividad del día");
-    }
-    if (fotoUrls.length === 0) missing.push("al menos una foto como evidencia");
+    if (fotoUrls.length === 0)
+      missing.push("al menos una foto como evidencia");
     if (!confirmado) missing.push("confirmar que la información es real");
 
     if (missing.length > 0) {
@@ -350,7 +330,8 @@ export default function ReportePage() {
         return;
       }
 
-      setSuccessMsg("✅ Tu reporte se envió correctamente.");
+      // ÉXITO 🎉
+      setSuccessMsg("Tu reporte se envió correctamente.");
       resetForm();
     } catch (err) {
       console.error("Error al enviar reporte:", err);
@@ -362,7 +343,7 @@ export default function ReportePage() {
     }
   }
 
-  // -------- RENDER --------
+  // ---------------- RENDER ----------------
 
   if (!supervisor) {
     return (
@@ -388,7 +369,7 @@ export default function ReportePage() {
             </p>
           </div>
 
-          {/* ALERTAS */}
+          {/* ALERTAS BONITAS */}
           {errorMsg && (
             <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs sm:text-sm text-red-800 flex gap-2">
               <span className="text-lg">⚠️</span>
@@ -403,7 +384,7 @@ export default function ReportePage() {
             </div>
           )}
 
-          {/* FORM */}
+          {/* FORMULARIO */}
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Fecha + Supervisor */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -464,7 +445,7 @@ export default function ReportePage() {
               </div>
             </div>
 
-            {/* ACTIVIDADES (PÍLDORAS) */}
+            {/* ACTIVIDADES COMO PÍLDORAS */}
             <div className="space-y-3 border-t border-slate-200 pt-4">
               <h2 className="text-sm font-semibold text-slate-800">
                 Actividades del día *
@@ -473,7 +454,7 @@ export default function ReportePage() {
                 Toca cada actividad para marcarla o desmarcarla.
               </p>
 
-              {/* Fabricación */}
+              {/* FABRICACIÓN */}
               <div className="space-y-2">
                 <p className="text-xs font-semibold text-slate-700">
                   Fabricación
@@ -486,7 +467,7 @@ export default function ReportePage() {
                         key={act}
                         type="button"
                         onClick={() => toggleActividad("fabricacion", act)}
-                        className={`text-xs rounded-full border px-3 py-1 ${
+                        className={`text-xs sm:text-sm rounded-full border px-3 py-1 ${
                           checked
                             ? "bg-sky-600 border-sky-600 text-white"
                             : "bg-slate-50 border-slate-300 text-slate-700"
@@ -499,7 +480,7 @@ export default function ReportePage() {
                 </div>
               </div>
 
-              {/* Instalación */}
+              {/* INSTALACIÓN */}
               <div className="space-y-2">
                 <p className="text-xs font-semibold text-slate-700">
                   Instalación
@@ -512,7 +493,7 @@ export default function ReportePage() {
                         key={act}
                         type="button"
                         onClick={() => toggleActividad("instalacion", act)}
-                        className={`text-xs rounded-full border px-3 py-1 ${
+                        className={`text-xs sm:text-sm rounded-full border px-3 py-1 ${
                           checked
                             ? "bg-sky-600 border-sky-600 text-white"
                             : "bg-slate-50 border-slate-300 text-slate-700"
@@ -525,7 +506,7 @@ export default function ReportePage() {
                 </div>
               </div>
 
-              {/* Supervisión */}
+              {/* SUPERVISIÓN */}
               <div className="space-y-2">
                 <p className="text-xs font-semibold text-slate-700">
                   Supervisión
@@ -538,7 +519,7 @@ export default function ReportePage() {
                         key={act}
                         type="button"
                         onClick={() => toggleActividad("supervision", act)}
-                        className={`text-xs rounded-full border px-3 py-1 ${
+                        className={`text-xs sm:text-sm rounded-full border px-3 py-1 ${
                           checked
                             ? "bg-sky-600 border-sky-600 text-white"
                             : "bg-slate-50 border-slate-300 text-slate-700"
@@ -629,31 +610,26 @@ export default function ReportePage() {
                 Evidencia fotográfica *
               </h2>
               <p className="text-xs text-slate-500">
-                Sube hasta {MAX_FOTOS} fotos del día (avances, detalles y
-                pendientes).
+                Sube hasta {MAX_FOTOS} fotos del día (panorámicas, detalles,
+                avances y pendientes).
               </p>
 
-              <div className="flex items-center justify-between">
-                <label className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-xl px-4 py-4 text-center cursor-pointer hover:border-sky-500 hover:bg-sky-50 transition">
-                  <span className="text-sm font-medium text-slate-700">
-                    Seleccionar archivos
-                  </span>
-                  <span className="text-xs text-slate-500 mt-1">
-                    JPG o PNG. Máximo {MAX_FOTOS} imágenes.
-                  </span>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => handleUploadFotos(e.target.files)}
-                  />
-                </label>
-                <span className="ml-3 text-xs text-slate-500 whitespace-nowrap">
-                  {fotoUrls.length}/{MAX_FOTOS} cargadas
+              <label className="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-xl px-4 py-6 text-center cursor-pointer hover:border-sky-500 hover:bg-sky-50 transition">
+                <span className="text-sm font-medium text-slate-700">
+                  Seleccionar archivos
                 </span>
-              </div>
+                <span className="text-xs text-slate-500 mt-1">
+                  Se aceptan JPG y PNG. Máximo {MAX_FOTOS} imágenes.
+                </span>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => handleUploadFotos(e.target.files)}
+                />
+              </label>
 
               {subiendoFotos && (
                 <p className="text-xs text-slate-500">
@@ -687,7 +663,6 @@ export default function ReportePage() {
                   className="mt-0.5 h-4 w-4 rounded border-slate-300"
                   checked={confirmado}
                   onChange={(e) => setConfirmado(e.target.checked)}
-                  required
                 />
                 <span>
                   Confirmo que la información capturada es real y verificable.
