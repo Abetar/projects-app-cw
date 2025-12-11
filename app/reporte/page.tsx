@@ -44,33 +44,84 @@ const PENDIENTE_OPCIONES = [
   "Otro",
 ];
 
+const ACTIVIDADES_FABRICACION = [
+  "Habilitado",
+  "Corte",
+  "Armado",
+  "Ensamble",
+  "Limpieza de piezas",
+  "Colocación de aluminio",
+  "Colocación de vidrio",
+  "Sellos interior",
+  "Sellos exterior",
+  "Accesorios",
+  "Prearmado en taller",
+  "Perforado de piezas",
+  "Rectificado / ajuste de piezas",
+  "Preparación de anclajes",
+  "Soldadura de elementos",
+];
+
+const ACTIVIDADES_INSTALACION = [
+  "Colocación de aluminio",
+  "Colocación de vidrio",
+  "Colocación de accesorios",
+  "Ajuste de postes",
+  "Sellos interior",
+  "Sellos exterior",
+  "Limpieza",
+  "Nivelación y plomeo",
+  "Fijación de anclajes",
+  "Sellado perimetral",
+  "Colocación de bastidores",
+  "Corrección de desalineaciones",
+];
+
+const ACTIVIDADES_SUPERVISION = [
+  "Revisión de calidad",
+  "Revisión de avances",
+  "Coordinación con contratista",
+  "Validación de metrado",
+  "Supervisión general de frente",
+  "Levantamiento de pendientes",
+  "Verificación de seguridad en obra",
+  "Revisión de planos vs. ejecución",
+  "Registro fotográfico de avance",
+  "Cierre de frente / liberación de zona",
+  "Inducción / charla de seguridad diaria",
+];
+
+const MAX_FOTOS = 5;
+
 export default function ReportePage() {
   const router = useRouter();
 
-  // ---------------- SUPERVISOR / LOGIN ----------------
+  // -------- SUPERVISOR / LOGIN ----------
   const [supervisor, setSupervisor] = useState<SupervisorSession | null>(null);
 
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem("cw_supervisor");
-      if (!raw) {
+      const id = window.localStorage.getItem("cw_supervisor_id");
+      const name = window.localStorage.getItem("cw_supervisor_name");
+
+      if (!id) {
         router.push("/supervisor");
         return;
       }
-      const parsed: SupervisorSession = JSON.parse(raw);
-      if (!parsed?.id) {
-        router.push("/supervisor");
-        return;
-      }
-      setSupervisor(parsed);
+
+      setSupervisor({
+        id,
+        name: name || "",
+      });
     } catch {
       router.push("/supervisor");
     }
   }, [router]);
 
-  // ---------------- PROYECTOS ----------------
+  // -------- PROYECTOS ----------
   const [proyectos, setProyectos] = useState<Proyecto[]>([]);
   const [loadingProyectos, setLoadingProyectos] = useState(false);
+  const [proyectoId, setProyectoId] = useState("");
 
   useEffect(() => {
     const load = async () => {
@@ -88,49 +139,44 @@ export default function ReportePage() {
     load();
   }, []);
 
-  const [proyectoId, setProyectoId] = useState("");
   const selectedProyecto = proyectos.find((p) => p.id === proyectoId) ?? null;
 
-  // ---------------- FORM STATE ----------------
+  // -------- FORM STATE ----------
   const [fecha, setFecha] = useState("");
   const [area, setArea] = useState("");
 
-  // Actividades (multi-select simple con checkboxes)
-  const ACTIVIDADES = [
-    "Habilitado",
-    "Armado",
-    "Limpieza de piezas",
-    "Colocación de vidrio",
-    "Sellos interior",
-    "Sellos exterior",
-    "Accesorios",
-    "Revisión de calidad",
-    "Coordinación con contratista",
-    "Corte",
-    "Ensamble",
-    "Colocación de aluminio",
-    "Ajuste de postes",
-    "Limpieza",
-    "Validación de metrado",
-    "Revisión de avances",
-  ];
+  // Fecha default hoy
+  useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    setFecha(today);
+  }, []);
 
-  const [actividadesSeleccionadas, setActividadesSeleccionadas] = useState<
-    string[]
-  >([]);
+  // Actividades (3 grupos, estilo píldora)
+  const [actividadesFabricacion, setActividadesFabricacion] = useState<string[]>(
+    []
+  );
+  const [actividadesInstalacion, setActividadesInstalacion] = useState<string[]>(
+    []
+  );
+  const [actividadesSupervision, setActividadesSupervision] = useState<string[]>(
+    []
+  );
 
-  const toggleActividad = (nombre: string) => {
-    setActividadesSeleccionadas((prev) =>
-      prev.includes(nombre)
-        ? prev.filter((a) => a !== nombre)
-        : [...prev, nombre]
+  const toggleActividad = (
+    tipo: "fabricacion" | "instalacion" | "supervision",
+    nombre: string
+  ) => {
+    const updater =
+      tipo === "fabricacion"
+        ? setActividadesFabricacion
+        : tipo === "instalacion"
+        ? setActividadesInstalacion
+        : setActividadesSupervision;
+
+    updater((prev) =>
+      prev.includes(nombre) ? prev.filter((a) => a !== nombre) : [...prev, nombre]
     );
   };
-
-  // Agrupamos TODO en fabricación para simplificar integración con Airtable
-  const actividadesFabricacion = actividadesSeleccionadas;
-  const actividadesInstalacion: string[] = [];
-  const actividadesSupervision: string[] = [];
 
   // Incidencias
   const [tiempoMuerto, setTiempoMuerto] = useState("");
@@ -154,29 +200,39 @@ export default function ReportePage() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
 
-  // ---------------- HANDLERS ----------------
+  // -------- HANDLERS --------
 
   async function handleUploadFotos(files: FileList | null) {
     if (!files || files.length === 0) return;
 
-    const maxFiles = 5;
-    const filesArray = Array.from(files).slice(0, maxFiles);
+    const remaining = MAX_FOTOS - fotoUrls.length;
+    if (remaining <= 0) {
+      setErrorMsg(`Solo puedes subir máximo ${MAX_FOTOS} fotos.`);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    const toUpload = Array.from(files).slice(0, remaining);
 
     setSubiendoFotos(true);
     setErrorMsg(null);
     setSuccessMsg(null);
 
+    const uploadPreset =
+      process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || "cw_uploads";
+    const cloudName =
+      process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || "cw-cloud";
+
     try {
       const urls: string[] = [];
 
-      for (const file of filesArray) {
+      for (const file of toUpload) {
         const formData = new FormData();
         formData.append("file", file);
-        // Ajusta este preset a tu config de Cloudinary
-        formData.append("upload_preset", "cw_uploads");
+        formData.append("upload_preset", uploadPreset);
 
         const res = await fetch(
-          "https://api.cloudinary.com/v1_1/cw-cloud/image/upload",
+          `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
           {
             method: "POST",
             body: formData,
@@ -196,7 +252,7 @@ export default function ReportePage() {
 
       setFotoUrls((prev) => {
         const merged = [...prev, ...urls];
-        return merged.slice(0, maxFiles);
+        return merged.slice(0, MAX_FOTOS);
       });
     } catch (e) {
       console.error("Error en upload Cloudinary", e);
@@ -212,10 +268,13 @@ export default function ReportePage() {
   }
 
   function resetForm() {
-    setFecha("");
+    const today = new Date().toISOString().slice(0, 10);
+    setFecha(today);
     setArea("");
     setProyectoId("");
-    setActividadesSeleccionadas([]);
+    setActividadesFabricacion([]);
+    setActividadesInstalacion([]);
+    setActividadesSupervision([]);
     setTiempoMuerto("");
     setTiempoMuertoOtro("");
     setPendiente("");
@@ -235,11 +294,17 @@ export default function ReportePage() {
     setErrorMsg(null);
     setSuccessMsg(null);
 
-    // ---------------- VALIDACIÓN BONITA ----------------
     const missing: string[] = [];
 
     if (!fecha) missing.push("la fecha del día");
     if (!proyectoId) missing.push("el proyecto del día");
+    if (
+      actividadesFabricacion.length === 0 &&
+      actividadesInstalacion.length === 0 &&
+      actividadesSupervision.length === 0
+    ) {
+      missing.push("al menos una actividad del día");
+    }
     if (fotoUrls.length === 0) missing.push("al menos una foto como evidencia");
     if (!confirmado) missing.push("confirmar que la información es real");
 
@@ -285,8 +350,7 @@ export default function ReportePage() {
         return;
       }
 
-      // ÉXITO 🎉
-      setSuccessMsg("Tu reporte se envió correctamente.");
+      setSuccessMsg("✅ Tu reporte se envió correctamente.");
       resetForm();
     } catch (err) {
       console.error("Error al enviar reporte:", err);
@@ -298,7 +362,7 @@ export default function ReportePage() {
     }
   }
 
-  // ---------------- RENDER ----------------
+  // -------- RENDER --------
 
   if (!supervisor) {
     return (
@@ -324,7 +388,7 @@ export default function ReportePage() {
             </p>
           </div>
 
-          {/* ALERTAS BONITAS */}
+          {/* ALERTAS */}
           {errorMsg && (
             <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs sm:text-sm text-red-800 flex gap-2">
               <span className="text-lg">⚠️</span>
@@ -339,7 +403,7 @@ export default function ReportePage() {
             </div>
           )}
 
-          {/* FORMULARIO */}
+          {/* FORM */}
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Fecha + Supervisor */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -400,32 +464,91 @@ export default function ReportePage() {
               </div>
             </div>
 
-            {/* ACTIVIDADES */}
-            <div className="space-y-2">
+            {/* ACTIVIDADES (PÍLDORAS) */}
+            <div className="space-y-3 border-t border-slate-200 pt-4">
               <h2 className="text-sm font-semibold text-slate-800">
                 Actividades del día *
               </h2>
               <p className="text-xs text-slate-500">
-                Marca todas las actividades que se realizaron.
+                Toca cada actividad para marcarla o desmarcarla.
               </p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {ACTIVIDADES.map((act) => {
-                  const checked = actividadesSeleccionadas.includes(act);
-                  return (
-                    <button
-                      key={act}
-                      type="button"
-                      onClick={() => toggleActividad(act)}
-                      className={`text-xs sm:text-sm rounded-full border px-3 py-1 text-left ${
-                        checked
-                          ? "bg-sky-600 border-sky-600 text-white"
-                          : "bg-white border-slate-300 text-slate-700"
-                      }`}
-                    >
-                      {act}
-                    </button>
-                  );
-                })}
+
+              {/* Fabricación */}
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-slate-700">
+                  Fabricación
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {ACTIVIDADES_FABRICACION.map((act) => {
+                    const checked = actividadesFabricacion.includes(act);
+                    return (
+                      <button
+                        key={act}
+                        type="button"
+                        onClick={() => toggleActividad("fabricacion", act)}
+                        className={`text-xs rounded-full border px-3 py-1 ${
+                          checked
+                            ? "bg-sky-600 border-sky-600 text-white"
+                            : "bg-slate-50 border-slate-300 text-slate-700"
+                        }`}
+                      >
+                        {act}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Instalación */}
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-slate-700">
+                  Instalación
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {ACTIVIDADES_INSTALACION.map((act) => {
+                    const checked = actividadesInstalacion.includes(act);
+                    return (
+                      <button
+                        key={act}
+                        type="button"
+                        onClick={() => toggleActividad("instalacion", act)}
+                        className={`text-xs rounded-full border px-3 py-1 ${
+                          checked
+                            ? "bg-sky-600 border-sky-600 text-white"
+                            : "bg-slate-50 border-slate-300 text-slate-700"
+                        }`}
+                      >
+                        {act}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Supervisión */}
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-slate-700">
+                  Supervisión
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {ACTIVIDADES_SUPERVISION.map((act) => {
+                    const checked = actividadesSupervision.includes(act);
+                    return (
+                      <button
+                        key={act}
+                        type="button"
+                        onClick={() => toggleActividad("supervision", act)}
+                        className={`text-xs rounded-full border px-3 py-1 ${
+                          checked
+                            ? "bg-sky-600 border-sky-600 text-white"
+                            : "bg-slate-50 border-slate-300 text-slate-700"
+                        }`}
+                      >
+                        {act}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
@@ -506,26 +629,31 @@ export default function ReportePage() {
                 Evidencia fotográfica *
               </h2>
               <p className="text-xs text-slate-500">
-                Sube hasta 5 fotos del día (panorámicas, detalles, avances y
+                Sube hasta {MAX_FOTOS} fotos del día (avances, detalles y
                 pendientes).
               </p>
 
-              <label className="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-xl px-4 py-6 text-center cursor-pointer hover:border-sky-500 hover:bg-sky-50 transition">
-                <span className="text-sm font-medium text-slate-700">
-                  Seleccionar archivos
+              <div className="flex items-center justify-between">
+                <label className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-xl px-4 py-4 text-center cursor-pointer hover:border-sky-500 hover:bg-sky-50 transition">
+                  <span className="text-sm font-medium text-slate-700">
+                    Seleccionar archivos
+                  </span>
+                  <span className="text-xs text-slate-500 mt-1">
+                    JPG o PNG. Máximo {MAX_FOTOS} imágenes.
+                  </span>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => handleUploadFotos(e.target.files)}
+                  />
+                </label>
+                <span className="ml-3 text-xs text-slate-500 whitespace-nowrap">
+                  {fotoUrls.length}/{MAX_FOTOS} cargadas
                 </span>
-                <span className="text-xs text-slate-500 mt-1">
-                  Se aceptan JPG y PNG. Máximo 5 imágenes.
-                </span>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => handleUploadFotos(e.target.files)}
-                />
-              </label>
+              </div>
 
               {subiendoFotos && (
                 <p className="text-xs text-slate-500">
@@ -559,8 +687,11 @@ export default function ReportePage() {
                   className="mt-0.5 h-4 w-4 rounded border-slate-300"
                   checked={confirmado}
                   onChange={(e) => setConfirmado(e.target.checked)}
+                  required
                 />
-                <span>Confirmo que la información capturada es real y verificable.</span>
+                <span>
+                  Confirmo que la información capturada es real y verificable.
+                </span>
               </label>
             </div>
 
