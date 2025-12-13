@@ -36,6 +36,20 @@ export async function POST(req: Request) {
       );
     }
 
+    // ✅ Sanitizar métricas (evita NaN/strings raros)
+    const safeMetrics = Array.isArray(body.metrics)
+      ? body.metrics
+          .filter((r) => r && typeof r === "object")
+          .map((r: any) => {
+            // si trae "cantidad", normalizamos a number si se puede
+            if ("cantidad" in r) {
+              const n = Number((r as any).cantidad);
+              return { ...r, cantidad: Number.isFinite(n) ? n : 0 };
+            }
+            return r;
+          })
+      : [];
+
     // Valores por defecto para evitar undefined
     const payload: CreateReportePayload = {
       fecha: body.fecha,
@@ -49,7 +63,7 @@ export async function POST(req: Request) {
       pendiente: body.pendiente ?? null,
       pendienteOtro: body.pendienteOtro ?? null,
       fotos: body.fotos ?? [],
-      metrics: body.metrics ?? [],
+      metrics: safeMetrics,
     };
 
     // 🧠 Llamamos a Airtable
@@ -81,7 +95,6 @@ export async function POST(req: Request) {
 export async function GET() {
   try {
     const reportes = await listReportes();
-
     return NextResponse.json(reportes, { status: 200 });
   } catch (error) {
     console.error("Error en GET /api/reportes:", error);

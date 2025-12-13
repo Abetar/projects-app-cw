@@ -6,13 +6,13 @@ export async function GET() {
   try {
     const proyectos = await listProyectos();
 
-    // Solo devolvemos lo que el frontend necesita
     return NextResponse.json(
       proyectos.map((p) => ({
         id: p.id,
         name: p.name,
         code: p.code,
-        formKey: p.formKey,
+        // ✅ asegura siempre string (evita null/undefined rompiendo el form)
+        formKey: String(p.formKey ?? ""),
       }))
     );
   } catch (error) {

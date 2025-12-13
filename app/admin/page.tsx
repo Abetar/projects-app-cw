@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReporteDiario } from "@/lib/airtable";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
@@ -27,6 +27,14 @@ function getISOWeek(dateStr: string) {
 }
 
 // ----------------------------------------------------
+// Normaliza texto de proyecto (Airtable a veces manda array)
+// ----------------------------------------------------
+function normalizeProyectoNombre(value: any) {
+  if (Array.isArray(value)) return value.join(" ").trim();
+  return String(value ?? "").trim();
+}
+
+// ----------------------------------------------------
 // Chips para actividades
 // ----------------------------------------------------
 function ChipsRow({ label, items }: { label: string; items?: string[] }) {
@@ -39,7 +47,7 @@ function ChipsRow({ label, items }: { label: string; items?: string[] }) {
         {items.map((item) => (
           <span
             key={item}
-            className="inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-xs"
+            className="inline-flex items-center rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700 border border-slate-200"
           >
             {item}
           </span>
@@ -108,41 +116,76 @@ export default function AdminPage() {
   // ----------------------------------------------------
   async function loadReportes() {
     setLoading(true);
-    const res = await fetch("/api/reportes");
-    const data: ReporteDiario[] = await res.json();
-    setReportes(data);
-    setLoading(false);
+    try {
+      const res = await fetch("/api/reportes", { cache: "no-store" });
+      const data: ReporteDiario[] = await res.json();
+      setReportes(data ?? []);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
     if (loggedIn) loadReportes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loggedIn]);
 
   // ----------------------------------------------------
   // Filtrado (semana, año, search)
   // ----------------------------------------------------
-  const filteredReportes = reportes.filter((r) => {
-    if (!r.fecha) return false;
+  const filteredReportes = useMemo(() => {
+    return reportes.filter((r) => {
+      if (!r.fecha) return false;
 
-    const week = getISOWeek(r.fecha);
-    const year = new Date(r.fecha).getFullYear();
+      const week = getISOWeek(r.fecha);
+      const year = new Date(r.fecha).getFullYear();
 
-    if (selectedWeek && week !== selectedWeek) return false;
-    if (selectedYear && year !== selectedYear) return false;
+      if (selectedWeek && week !== selectedWeek) return false;
+      if (selectedYear && year !== selectedYear) return false;
 
-    if (search.trim() !== "") {
-      const q = search.toLowerCase();
-      const text = `${r.proyectoNombre} ${r.supervisorNombre} ${
-        r.supervisorId || ""
-      } ${r.fecha}`.toLowerCase();
-      if (!text.includes(q)) return false;
-    }
+      if (search.trim() !== "") {
+        const q = search.toLowerCase();
+        const proyectoNombre = normalizeProyectoNombre(
+          (r as any).proyectoNombre
+        );
+        const text = `${proyectoNombre} ${r.supervisorNombre} ${
+          r.supervisorId || ""
+        } ${r.fecha}`.toLowerCase();
+        if (!text.includes(q)) return false;
+      }
 
-    return true;
-  });
+      return true;
+    });
+  }, [reportes, selectedWeek, selectedYear, search]);
 
   // ----------------------------------------------------
-  // Exportar a PDF (pdf-lib)
+  // Stats para dashboard
+  // ----------------------------------------------------
+  const stats = useMemo(() => {
+    const total = filteredReportes.length;
+
+    const uniqueProjects = new Set(
+      filteredReportes
+        .map((r) => normalizeProyectoNombre((r as any).proyectoNombre))
+        .filter(Boolean)
+    ).size;
+
+    const uniqueSupervisors = new Set(
+      filteredReportes
+        .map((r) => String(r.supervisorNombre || r.supervisorId || "").trim())
+        .filter(Boolean)
+    ).size;
+
+    const totalFotos = filteredReportes.reduce(
+      (acc, r) => acc + (r.fotos?.length ?? 0),
+      0
+    );
+
+    return { total, uniqueProjects, uniqueSupervisors, totalFotos };
+  }, [filteredReportes]);
+
+  // ----------------------------------------------------
+  // Exportar a PDF (pdf-lib) - con page-break real
   // ----------------------------------------------------
   async function handleExportPdf(reporte: ReporteDiario) {
     try {
@@ -150,96 +193,98 @@ export default function AdminPage() {
       const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
       const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-      // Página principal
-      const page = pdfDoc.addPage();
-      const { width, height } = page.getSize();
       const margin = 50;
+      const BOTTOM_LIMIT = 80;
+
+      let page = pdfDoc.addPage();
+      let { width, height } = page.getSize();
       let y = height - margin;
+
+      function addPage() {
+        page = pdfDoc.addPage();
+        ({ width, height } = page.getSize());
+        y = height - margin;
+      }
+
+      function ensureSpace(neededPx: number) {
+        if (y - neededPx < BOTTOM_LIMIT) addPage();
+      }
+
+      function drawLine(
+        text: string,
+        opts: { size: number; bold?: boolean; indent?: number } = {
+          size: 11,
+        }
+      ) {
+        const size = opts.size ?? 11;
+        const indent = opts.indent ?? 0;
+
+        ensureSpace(size + 6);
+
+        page.drawText(text, {
+          x: margin + indent,
+          y,
+          size,
+          font: opts.bold ? fontBold : font,
+          color: rgb(0, 0, 0),
+        });
+
+        y -= size + 6;
+      }
 
       // Logo
       try {
-        const logoUrl = "/cw-logo.jpg"; // coloca tu logo en public/cw-logo.jpg
+        const logoUrl = "/cw-logo.jpg"; // public/cw-logo.jpg
         const logoBytes = await fetch(logoUrl).then((r) => r.arrayBuffer());
         const logoImage = await pdfDoc.embedJpg(logoBytes);
+
         const logoWidth = 100;
         const logoHeight = (logoImage.height / logoImage.width) * logoWidth;
 
+        ensureSpace(logoHeight + 10);
+
         page.drawImage(logoImage, {
-          x: width / 2 - logoWidth / 2 + 200,
+          x: width - margin - logoWidth,
           y: y - logoHeight,
           width: logoWidth,
           height: logoHeight,
         });
 
-        y -= logoHeight + 20;
+        y -= logoHeight + 18;
       } catch (e) {
         console.warn("No se pudo cargar el logo para el PDF:", e);
       }
 
-      // Título
-      page.drawText("Reporte diario de obra", {
-        x: margin,
-        y,
-        size: 18,
-        font: fontBold,
-        color: rgb(0, 0, 0),
-      });
-      y -= 30;
+      // Título + datos generales
+      drawLine("Reporte diario de obra", { size: 18, bold: true });
 
       const supervisorNombre =
         reporte.supervisorNombre || reporte.supervisorId || "";
       const fechaTexto = reporte.fecha || "";
+      const proyectoNombre = normalizeProyectoNombre(
+        (reporte as any).proyectoNombre
+      );
 
-      // Datos generales
-      const linesGeneral = [
-        `Proyecto: ${reporte.proyectoNombre || "-"}`,
-        `Supervisor: ${supervisorNombre || "-"}`,
-        `Fecha: ${fechaTexto || "-"}`,
-      ];
+      y -= 4;
+      drawLine(`Proyecto: ${proyectoNombre || "-"}`, { size: 12 });
+      drawLine(`Supervisor: ${supervisorNombre || "-"}`, { size: 12 });
+      drawLine(`Fecha: ${fechaTexto || "-"}`, { size: 12 });
 
-      linesGeneral.forEach((line) => {
-        page.drawText(line, {
-          x: margin,
-          y,
-          size: 12,
-          font,
-          color: rgb(0, 0, 0),
-        });
-        y -= 18;
-      });
-
-      y -= 10;
+      y -= 6;
 
       // Actividades
-      page.drawText("Actividades del día:", {
-        x: margin,
-        y,
-        size: 14,
-        font: fontBold,
-        color: rgb(0, 0, 0),
-      });
-      y -= 20;
+      drawLine("Actividades del día:", { size: 14, bold: true });
 
       function drawList(label: string, items?: string[]) {
         if (!items || items.length === 0) return;
-        page.drawText(label, {
-          x: margin,
-          y,
-          size: 12,
-          font: fontBold,
-        });
-        y -= 16;
 
-        items.forEach((item) => {
-          page.drawText(`• ${item}`, {
-            x: margin + 10,
-            y,
-            size: 11,
-            font,
-          });
-          y -= 14;
-        });
-        y -= 6;
+        drawLine(label, { size: 12, bold: true });
+
+        for (const item of items) {
+          drawLine(`• ${item}`, { size: 11, indent: 10 });
+        }
+
+        y -= 4;
       }
 
       drawList("Fabricación:", reporte.actividadesFabricacion);
@@ -248,64 +293,26 @@ export default function AdminPage() {
 
       // Incidencias
       if (reporte.tiempoMuerto || reporte.pendiente) {
-        y -= 4;
-        page.drawText("Incidencias:", {
-          x: margin,
-          y,
-          size: 14,
-          font: fontBold,
-        });
-        y -= 20;
+        y -= 2;
+        drawLine("Incidencias:", { size: 14, bold: true });
 
-        if (reporte.tiempoMuerto) {
-          page.drawText(`Tiempo muerto: ${reporte.tiempoMuerto}`, {
-            x: margin,
-            y,
+        if (reporte.tiempoMuerto)
+          drawLine(`Tiempo muerto: ${reporte.tiempoMuerto}`, { size: 11 });
+        if (reporte.tiempoMuertoOtro)
+          drawLine(`Tiempo muerto (otro): ${reporte.tiempoMuertoOtro}`, {
             size: 11,
-            font,
           });
-          y -= 14;
-        }
-        if (reporte.tiempoMuertoOtro) {
-          page.drawText(`Tiempo muerto (otro): ${reporte.tiempoMuertoOtro}`, {
-            x: margin,
-            y,
-            size: 11,
-            font,
-          });
-          y -= 14;
-        }
 
-        if (reporte.pendiente) {
-          page.drawText(`Pendiente: ${reporte.pendiente}`, {
-            x: margin,
-            y,
-            size: 11,
-            font,
-          });
-          y -= 14;
-        }
-        if (reporte.pendienteOtro) {
-          page.drawText(`Pendiente (otro): ${reporte.pendienteOtro}`, {
-            x: margin,
-            y,
-            size: 11,
-            font,
-          });
-          y -= 14;
-        }
+        if (reporte.pendiente)
+          drawLine(`Pendiente: ${reporte.pendiente}`, { size: 11 });
+        if (reporte.pendienteOtro)
+          drawLine(`Pendiente (otro): ${reporte.pendienteOtro}`, { size: 11 });
       }
 
       // Métricas
       if (reporte.metrics && reporte.metrics.length > 0) {
-        y -= 10;
-        page.drawText("Métricas:", {
-          x: margin,
-          y,
-          size: 14,
-          font: fontBold,
-        });
-        y -= 20;
+        y -= 6;
+        drawLine("Métricas:", { size: 14, bold: true });
 
         for (const m of reporte.metrics as any[]) {
           const hasBorealShape = Boolean(m.codigo || m.medida);
@@ -325,19 +332,7 @@ export default function AdminPage() {
             line += JSON.stringify(m);
           }
 
-          page.drawText(line, {
-            x: margin + 5,
-            y,
-            size: 10,
-            font,
-          });
-          y -= 14;
-
-          if (y < 80) {
-            // Nueva página si nos quedamos sin espacio
-            const newPage = pdfDoc.addPage();
-            y = newPage.getSize().height - margin;
-          }
+          drawLine(line, { size: 10 });
         }
       }
 
@@ -380,7 +375,6 @@ export default function AdminPage() {
               height: displayHeight,
             });
 
-            // Texto pequeño abajo
             imgPage.drawText("Evidencia fotográfica", {
               x: margin,
               y: margin - 10,
@@ -396,27 +390,29 @@ export default function AdminPage() {
 
       const pdfBytes = await pdfDoc.save();
 
-      // ✅ usar el buffer interno como ArrayBuffer
-      const blob = new Blob([pdfBytes.buffer as ArrayBuffer], {
+      // ✅ FIX definitivo TS: Blob con Uint8Array
+      const blob = new Blob([new Uint8Array(pdfBytes)], {
         type: "application/pdf",
       });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      const proyectoNombre = Array.isArray(reporte.proyectoNombre)
-        ? reporte.proyectoNombre.join(" ")
-        : reporte.proyectoNombre || "reporte";
 
-      const safeProyecto = proyectoNombre
+      const fileUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = fileUrl;
+
+      const proyectoNombreForFile =
+        normalizeProyectoNombre((reporte as any).proyectoNombre) || "reporte";
+
+      const safeProyecto = proyectoNombreForFile
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9]+/gi, "-");
       const safeFecha = (reporte.fecha || "").replace(/[^0-9-]/g, "");
-      link.href = url;
+
       link.download = `reporte_${safeProyecto}_${safeFecha}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(fileUrl);
     } catch (error) {
       console.error("Error generando PDF:", error);
       alert("Hubo un error al generar el PDF.");
@@ -424,30 +420,33 @@ export default function AdminPage() {
   }
 
   // ----------------------------------------------------
-  // Pantalla de LOGIN
+  // Pantalla de LOGIN (estilo)
   // ----------------------------------------------------
   if (!loggedIn) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
         <form
           onSubmit={handleLogin}
-          className="bg-white border rounded-lg shadow p-6 w-full max-w-sm"
+          className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 w-full max-w-sm"
         >
-          <h2 className="text-xl font-bold mb-4 text-center">
+          <h2 className="text-xl font-semibold mb-1 text-center text-slate-900">
             Panel de Administración
           </h2>
+          <p className="text-center text-sm text-slate-500 mb-5">
+            Ingresa la contraseña para ver reportes.
+          </p>
 
           <input
             type="password"
             placeholder="Contraseña"
-            className="border rounded px-3 py-2 w-full mb-4"
+            className="border border-slate-300 rounded-xl px-3 py-2 w-full mb-4 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
 
           <button
             type="submit"
-            className="bg-black text-white px-4 py-2 rounded w-full"
+            className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl w-full"
           >
             Entrar
           </button>
@@ -457,316 +456,421 @@ export default function AdminPage() {
   }
 
   // ----------------------------------------------------
-  // Vista principal ADMIN
+  // Vista principal ADMIN (dashboard)
   // ----------------------------------------------------
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Reportes enviados</h1>
-        <button
-          style={{
-            backgroundColor: "red",
-            color: "white",
-            padding: "8px 12px",
-            borderRadius: "6px",
-            fontSize: "14px",
-            cursor: "pointer",
-          }}
-          onClick={() => {
-            window.localStorage.removeItem("admin_logged_in");
-            setLoggedIn(false);
-          }}
-        >
-          Cerrar sesión
-        </button>
-      </div>
+    <div className="min-h-screen bg-slate-50">
+      <div className="max-w-7xl mx-auto p-6">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+          <div>
+            <h1 className="text-2xl font-semibold text-slate-900">
+              Dashboard de reportes
+            </h1>
+            <p className="text-sm text-slate-500">
+              Filtra por semana/año y revisa evidencias, métricas y exporta PDF.
+            </p>
+          </div>
 
-      {/* FILTROS */}
-      <div className="flex flex-wrap gap-6 mb-6">
-        {/* Semana */}
-        <div>
-          <label className="block text-sm font-semibold mb-1">
-            Semana del año
-          </label>
-          <select
-            className="border rounded px-3 py-2"
-            value={selectedWeek ?? ""}
-            onChange={(e) =>
-              setSelectedWeek(e.target.value ? Number(e.target.value) : null)
-            }
+          <button
+            className="inline-flex items-center justify-center rounded-xl bg-red-600 hover:bg-red-700 text-white px-4 py-2 text-sm font-medium"
+            onClick={() => {
+              window.localStorage.removeItem("admin_logged_in");
+              setLoggedIn(false);
+            }}
           >
-            <option value="">Todas</option>
-            {Array.from({ length: 52 }).map((_, i) => (
-              <option key={i} value={i + 1}>
-                Semana {i + 1}
-              </option>
-            ))}
-          </select>
+            Cerrar sesión
+          </button>
         </div>
 
-        {/* Año */}
-        <div>
-          <label className="block text-sm font-semibold mb-1">Año</label>
-          <select
-            className="border rounded px-3 py-2"
-            value={selectedYear ?? ""}
-            onChange={(e) =>
-              setSelectedYear(e.target.value ? Number(e.target.value) : null)
-            }
-          >
-            <option value="">Todos</option>
-            {[2024, 2025, 2026].map((year) => (
-              <option key={year} value={year}>
-                {year}
-              </option>
-            ))}
-          </select>
+        {/* Cards de stats */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+            <p className="text-xs text-slate-500">Reportes (filtro actual)</p>
+            <p className="text-2xl font-semibold text-slate-900 mt-1">
+              {stats.total}
+            </p>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+            <p className="text-xs text-slate-500">Proyectos únicos</p>
+            <p className="text-2xl font-semibold text-slate-900 mt-1">
+              {stats.uniqueProjects}
+            </p>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+            <p className="text-xs text-slate-500">Supervisores únicos</p>
+            <p className="text-2xl font-semibold text-slate-900 mt-1">
+              {stats.uniqueSupervisors}
+            </p>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+            <p className="text-xs text-slate-500">Fotos totales</p>
+            <p className="text-2xl font-semibold text-slate-900 mt-1">
+              {stats.totalFotos}
+            </p>
+          </div>
         </div>
 
-        {/* Search */}
-        <div className="flex-1 min-w-[200px]">
-          <label className="block text-sm font-semibold mb-1">
-            Buscar reporte
-          </label>
-          <input
-            type="text"
-            className="border rounded px-3 py-2 w-full"
-            placeholder="Buscar por proyecto, supervisor, fecha..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+        {/* Filtros */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm mb-6">
+          <div className="flex flex-wrap gap-4">
+            {/* Semana */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                Semana del año
+              </label>
+              <select
+                className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                value={selectedWeek ?? ""}
+                onChange={(e) =>
+                  setSelectedWeek(
+                    e.target.value ? Number(e.target.value) : null
+                  )
+                }
+              >
+                <option value="">Todas</option>
+                {Array.from({ length: 52 }).map((_, i) => (
+                  <option key={i} value={i + 1}>
+                    Semana {i + 1}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Año */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                Año
+              </label>
+              <select
+                className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                value={selectedYear ?? ""}
+                onChange={(e) =>
+                  setSelectedYear(
+                    e.target.value ? Number(e.target.value) : null
+                  )
+                }
+              >
+                <option value="">Todos</option>
+                {[2024, 2025, 2026].map((year) => (
+                  <option key={year} value={year}>
+                    {year}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Search */}
+            <div className="flex-1 min-w-[220px]">
+              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                Buscar reporte
+              </label>
+              <input
+                type="text"
+                className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                placeholder="Buscar por proyecto, supervisor, fecha..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+
+            {/* Refresh */}
+            <div className="flex items-end">
+              <button
+                className="rounded-xl bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-medium"
+                onClick={loadReportes}
+              >
+                Actualizar
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
 
-      {/* LOADING */}
-      {loading && <p>Cargando reportes...</p>}
+        {/* Loading */}
+        {loading && (
+          <div className="text-sm text-slate-600">Cargando reportes...</div>
+        )}
 
-      {/* GRID DE CARDS */}
-      {!loading && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredReportes.map((r) => (
-            <div
-              key={r.id}
-              className="border rounded-lg p-5 shadow-sm bg-white flex flex-col justify-between"
-            >
-              <p className="text-gray-600 text-sm">{r.fecha}</p>
+        {/* Grid */}
+        {!loading && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {filteredReportes.map((r) => {
+              const proyectoNombre = normalizeProyectoNombre(
+                (r as any).proyectoNombre
+              );
 
-              <h2 className="text-lg font-bold mt-1">{r.proyectoNombre}</h2>
+              return (
+                <div
+                  key={r.id}
+                  className="border border-slate-200 rounded-2xl p-5 shadow-sm bg-white flex flex-col justify-between hover:shadow-md transition"
+                >
+                  <div>
+                    <p className="text-slate-500 text-xs">{r.fecha || "—"}</p>
 
-              <p className="text-gray-700 mt-1 text-sm">
-                <strong>Supervisor:</strong>{" "}
-                {r.supervisorNombre || r.supervisorId}
+                    <h2 className="text-lg font-semibold text-slate-900 mt-1">
+                      {proyectoNombre || "Sin nombre"}
+                    </h2>
+
+                    <p className="text-slate-700 mt-2 text-sm">
+                      <span className="font-semibold">Supervisor:</span>{" "}
+                      {r.supervisorNombre || r.supervisorId}
+                    </p>
+
+                    <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
+                      <div className="rounded-xl bg-slate-50 border border-slate-200 p-2 text-center">
+                        <p className="text-slate-500">Fab</p>
+                        <p className="font-semibold text-slate-900">
+                          {r.actividadesFabricacion?.length ?? 0}
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-slate-50 border border-slate-200 p-2 text-center">
+                        <p className="text-slate-500">Inst</p>
+                        <p className="font-semibold text-slate-900">
+                          {r.actividadesInstalacion?.length ?? 0}
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-slate-50 border border-slate-200 p-2 text-center">
+                        <p className="text-slate-500">Sup</p>
+                        <p className="font-semibold text-slate-900">
+                          {r.actividadesSupervision?.length ?? 0}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+                      <span>Fotos: {r.fotos?.length ?? 0}</span>
+                      <span>Métricas: {r.metrics?.length ?? 0}</span>
+                    </div>
+                  </div>
+
+                  <button
+                    className="mt-5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white py-2 text-sm font-medium"
+                    onClick={() => setSelected(r)}
+                  >
+                    Ver detalles
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Empty */}
+        {!loading && filteredReportes.length === 0 && (
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 text-sm text-slate-600">
+            No hay reportes con los filtros actuales.
+          </div>
+        )}
+
+        {/* MODAL DETALLES */}
+        {selected && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-40">
+            <div className="bg-white rounded-2xl shadow-lg p-6 w-full max-w-2xl relative max-h-[90vh] overflow-y-auto border border-slate-200">
+              <button
+                className="absolute right-3 top-3 text-slate-600 hover:text-slate-900 text-lg"
+                onClick={() => setSelected(null)}
+                aria-label="Cerrar"
+              >
+                ✕
+              </button>
+
+              <h2 className="text-xl font-semibold text-slate-900 mb-1">
+                Detalle del reporte
+              </h2>
+              <p className="text-sm text-slate-500 mb-4">
+                Revisa actividades, métricas y evidencia.
               </p>
 
-              <div className="mt-3 text-sm text-gray-700">
-                <p>
-                  <strong>Fabricación:</strong>{" "}
-                  {r.actividadesFabricacion?.length ?? 0}
-                </p>
-                <p>
-                  <strong>Instalación:</strong>{" "}
-                  {r.actividadesInstalacion?.length ?? 0}
-                </p>
-                <p>
-                  <strong>Supervisión:</strong>{" "}
-                  {r.actividadesSupervision?.length ?? 0}
-                </p>
+              {/* Datos base */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+                  <p className="text-xs text-slate-500">Fecha</p>
+                  <p className="text-sm font-semibold text-slate-900">
+                    {selected.fecha || "—"}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+                  <p className="text-xs text-slate-500">Supervisor</p>
+                  <p className="text-sm font-semibold text-slate-900">
+                    {selected.supervisorNombre || selected.supervisorId || "—"}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+                  <p className="text-xs text-slate-500">Proyecto</p>
+                  <p className="text-sm font-semibold text-slate-900">
+                    {normalizeProyectoNombre(
+                      (selected as any).proyectoNombre
+                    ) || "—"}
+                  </p>
+                </div>
               </div>
 
-              <button
-                className="mt-4 bg-black text-white py-2 rounded"
-                onClick={() => setSelected(r)}
-              >
-                Ver detalles
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+              <div className="flex flex-wrap gap-2 mb-4">
+                <button
+                  className="rounded-xl bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-medium"
+                  onClick={() => handleExportPdf(selected)}
+                >
+                  Exportar PDF
+                </button>
+              </div>
 
-      {/* MODAL DETALLES */}
-      {selected && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-40">
-          <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-lg relative max-h-[90vh] overflow-y-auto">
-            <button
-              className="absolute right-3 top-3 text-lg"
-              onClick={() => setSelected(null)}
-            >
-              ✕
-            </button>
+              <hr className="my-4" />
 
-            <h2 className="text-xl font-bold mb-4">Detalle del reporte</h2>
+              {/* ACTIVIDADES */}
+              <h3 className="font-semibold text-slate-900 mb-2">Actividades</h3>
 
-            {/* Datos base */}
-            <p>
-              <strong>Fecha:</strong> {selected.fecha}
-            </p>
-            <p>
-              <strong>Supervisor:</strong>{" "}
-              {selected.supervisorNombre || selected.supervisorId}
-            </p>
-            <p>
-              <strong>Proyecto:</strong> {selected.proyectoNombre}
-            </p>
+              {(!selected.actividadesFabricacion ||
+                selected.actividadesFabricacion.length === 0) &&
+                (!selected.actividadesInstalacion ||
+                  selected.actividadesInstalacion.length === 0) &&
+                (!selected.actividadesSupervision ||
+                  selected.actividadesSupervision.length === 0) && (
+                  <p className="text-sm text-slate-600 mb-2">
+                    Sin actividades registradas.
+                  </p>
+                )}
 
-            <div className="mt-3 mb-4 flex gap-2">
-              <button
-                className="bg-black text-white px-3 py-2 rounded text-sm"
-                onClick={() => handleExportPdf(selected)}
-              >
-                Exportar PDF
-              </button>
-            </div>
+              <ChipsRow
+                label="Fabricación"
+                items={selected.actividadesFabricacion}
+              />
+              <ChipsRow
+                label="Instalación"
+                items={selected.actividadesInstalacion}
+              />
+              <ChipsRow
+                label="Supervisión"
+                items={selected.actividadesSupervision}
+              />
 
-            <hr className="my-3" />
+              <hr className="my-4" />
 
-            {/* ACTIVIDADES COMO CHIPS */}
-            <h3 className="font-bold mb-2">Actividades</h3>
-            {(!selected.actividadesFabricacion ||
-              selected.actividadesFabricacion.length === 0) &&
-              (!selected.actividadesInstalacion ||
-                selected.actividadesInstalacion.length === 0) &&
-              (!selected.actividadesSupervision ||
-                selected.actividadesSupervision.length === 0) && (
-                <p className="text-sm text-gray-600 mb-2">
-                  Sin actividades registradas.
+              {/* MÉTRICAS */}
+              <h3 className="font-semibold text-slate-900 mb-2">Métricas</h3>
+
+              {(!selected.metrics || selected.metrics.length === 0) && (
+                <p className="text-sm text-slate-600 mb-2">
+                  Sin métricas registradas.
                 </p>
               )}
 
-            <ChipsRow
-              label="Fabricación"
-              items={selected.actividadesFabricacion}
-            />
-            <ChipsRow
-              label="Instalación"
-              items={selected.actividadesInstalacion}
-            />
-            <ChipsRow
-              label="Supervisión"
-              items={selected.actividadesSupervision}
-            />
+              {selected.metrics && selected.metrics.length > 0 && (
+                <div className="space-y-3 text-sm">
+                  {selected.metrics.map((m: any, idx: number) => {
+                    const hasBorealShape = Boolean(m.codigo || m.medida);
+                    const hasTorresShape = Boolean(m.categoria || m.itemLabel);
 
-            <hr className="my-3" />
+                    return (
+                      <div
+                        key={idx}
+                        className="border border-slate-200 rounded-xl bg-slate-50 px-3 py-2"
+                      >
+                        {/* Boreal */}
+                        {hasBorealShape && !hasTorresShape && (
+                          <>
+                            {m.codigo && (
+                              <p>
+                                <strong>Código:</strong> {m.codigo}
+                              </p>
+                            )}
+                            {m.medida && (
+                              <p>
+                                <strong>Medida:</strong> {m.medida}
+                              </p>
+                            )}
+                            {"cantidad" in m && (
+                              <p>
+                                <strong>Cantidad:</strong> {m.cantidad}
+                              </p>
+                            )}
+                          </>
+                        )}
 
-            {/* MÉTRICAS FORMATEADAS */}
-            <h3 className="font-bold mb-2">Métricas</h3>
-            {(!selected.metrics || selected.metrics.length === 0) && (
-              <p className="text-sm text-gray-600 mb-2">
-                Sin métricas registradas.
-              </p>
-            )}
+                        {/* Torres */}
+                        {hasTorresShape && (
+                          <>
+                            {m.categoria && (
+                              <p>
+                                <strong>Categoría:</strong> {m.categoria}
+                              </p>
+                            )}
+                            {m.itemLabel && (
+                              <p>
+                                <strong>Item:</strong> {m.itemLabel}
+                              </p>
+                            )}
+                            {"cantidad" in m && (
+                              <p>
+                                <strong>Cantidad:</strong> {m.cantidad}
+                              </p>
+                            )}
+                          </>
+                        )}
 
-            {selected.metrics && selected.metrics.length > 0 && (
-              <div className="space-y-3 text-sm">
-                {selected.metrics.map((m: any, idx: number) => {
-                  const hasBorealShape = Boolean(m.codigo || m.medida);
-                  const hasTorresShape = Boolean(m.categoria || m.itemLabel);
-
-                  return (
-                    <div
-                      key={idx}
-                      className="border rounded bg-gray-50 px-3 py-2"
-                    >
-                      {/* Boreal */}
-                      {hasBorealShape && !hasTorresShape && (
-                        <>
-                          {m.codigo && (
-                            <p>
-                              <strong>Código:</strong> {m.codigo}
-                            </p>
-                          )}
-                          {m.medida && (
-                            <p>
-                              <strong>Medida:</strong> {m.medida}
-                            </p>
-                          )}
-                          {"cantidad" in m && (
-                            <p>
-                              <strong>Cantidad:</strong> {m.cantidad}
-                            </p>
-                          )}
-                        </>
-                      )}
-
-                      {/* Torres 1000 */}
-                      {hasTorresShape && (
-                        <>
-                          {m.categoria && (
-                            <p>
-                              <strong>Categoría:</strong> {m.categoria}
-                            </p>
-                          )}
-                          {m.itemLabel && (
-                            <p>
-                              <strong>Item:</strong> {m.itemLabel}
-                            </p>
-                          )}
-                          {"cantidad" in m && (
-                            <p>
-                              <strong>Cantidad:</strong> {m.cantidad}
-                            </p>
-                          )}
-                        </>
-                      )}
-
-                      {/* Fallback genérico */}
-                      {!hasBorealShape && !hasTorresShape && (
-                        <pre className="text-xs whitespace-pre-wrap">
-                          {JSON.stringify(m, null, 2)}
-                        </pre>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            <hr className="my-3" />
-
-            {/* FOTOS */}
-            {selected.fotos?.length > 0 && (
-              <>
-                <h3 className="font-bold mb-2">Fotos</h3>
-                <div className="flex gap-2 mt-2 overflow-x-auto">
-                  {selected.fotos.map((url, i) => (
-                    <img
-                      key={i}
-                      src={url}
-                      className="h-24 rounded border object-cover cursor-zoom-in"
-                      onClick={() => setExpandedPhoto(url)}
-                    />
-                  ))}
+                        {/* Fallback */}
+                        {!hasBorealShape && !hasTorresShape && (
+                          <pre className="text-xs whitespace-pre-wrap">
+                            {JSON.stringify(m, null, 2)}
+                          </pre>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+              )}
 
-      {/* Lightbox para foto expandida */}
-      {expandedPhoto && (
-        <div
-          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
-          onClick={() => setExpandedPhoto(null)}
-        >
-          <div
-            className="relative max-w-4xl max-h-[90vh]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              className="absolute right-2 top-2 text-white text-2xl font-bold"
-              onClick={() => setExpandedPhoto(null)}
-            >
-              ✕
-            </button>
-            <img
-              src={expandedPhoto}
-              className="max-h-[80vh] max-w-[90vw] object-contain rounded-lg shadow-lg"
-              alt="Foto ampliada"
-            />
+              <hr className="my-4" />
+
+              {/* FOTOS */}
+              {selected.fotos?.length > 0 && (
+                <>
+                  <h3 className="font-semibold text-slate-900 mb-2">Fotos</h3>
+                  <div className="flex gap-2 mt-2 overflow-x-auto pb-1">
+                    {selected.fotos.map((url, i) => (
+                      <img
+                        key={i}
+                        src={url}
+                        className="h-24 w-32 rounded-xl border border-slate-200 object-cover cursor-zoom-in"
+                        onClick={() => setExpandedPhoto(url)}
+                        alt={`Foto ${i + 1}`}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* Lightbox para foto expandida */}
+        {expandedPhoto && (
+          <div
+            className="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
+            onClick={() => setExpandedPhoto(null)}
+          >
+            <div
+              className="relative max-w-4xl max-h-[90vh]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                className="absolute right-2 top-2 text-white text-2xl font-bold"
+                onClick={() => setExpandedPhoto(null)}
+                aria-label="Cerrar imagen"
+              >
+                ✕
+              </button>
+              <img
+                src={expandedPhoto}
+                className="max-h-[80vh] max-w-[90vw] object-contain rounded-2xl shadow-lg"
+                alt="Foto ampliada"
+              />
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
