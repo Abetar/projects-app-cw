@@ -22,7 +22,6 @@ function getISOWeek(dateStr: string) {
   tmp.setDate(tmp.getDate() - dayNr2 + 3);
 
   const week = 1 + Math.round((firstThursday - tmp.valueOf()) / 604800000);
-
   return week;
 }
 
@@ -57,12 +56,10 @@ function ChipsRow({ label, items }: { label: string; items?: string[] }) {
   );
 }
 
-// ----------------------------------------------------
-// Componente principal
-// ----------------------------------------------------
 export default function AdminPage() {
   const [password, setPassword] = useState("");
   const [loggedIn, setLoggedIn] = useState(false);
+
   const [reportes, setReportes] = useState<ReporteDiario[]>([]);
   const [selected, setSelected] = useState<ReporteDiario | null>(null);
   const [loading, setLoading] = useState(false);
@@ -116,18 +113,14 @@ export default function AdminPage() {
   // ----------------------------------------------------
   async function loadReportes() {
     setLoading(true);
-    try {
-      const res = await fetch("/api/reportes", { cache: "no-store" });
-      const data: ReporteDiario[] = await res.json();
-      setReportes(data ?? []);
-    } finally {
-      setLoading(false);
-    }
+    const res = await fetch("/api/reportes", { cache: "no-store" });
+    const data: ReporteDiario[] = await res.json();
+    setReportes(data);
+    setLoading(false);
   }
 
   useEffect(() => {
     if (loggedIn) loadReportes();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loggedIn]);
 
   // ----------------------------------------------------
@@ -145,12 +138,11 @@ export default function AdminPage() {
 
       if (search.trim() !== "") {
         const q = search.toLowerCase();
-        const proyectoNombre = normalizeProyectoNombre(
-          (r as any).proyectoNombre
-        );
+        const proyectoNombre = normalizeProyectoNombre((r as any).proyectoNombre);
         const text = `${proyectoNombre} ${r.supervisorNombre} ${
           r.supervisorId || ""
-        } ${r.fecha}`.toLowerCase();
+        } ${r.fecha} ${r.comentarioGeneral || ""}`.toLowerCase();
+
         if (!text.includes(q)) return false;
       }
 
@@ -185,7 +177,7 @@ export default function AdminPage() {
   }, [filteredReportes]);
 
   // ----------------------------------------------------
-  // Exportar a PDF (pdf-lib) - con page-break real
+  // Exportar a PDF (pdf-lib) con paginación REAL
   // ----------------------------------------------------
   async function handleExportPdf(reporte: ReporteDiario) {
     try {
@@ -194,43 +186,113 @@ export default function AdminPage() {
       const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
       const margin = 50;
-      const BOTTOM_LIMIT = 80;
 
+      // Estado "mutable" de página / cursor
       let page = pdfDoc.addPage();
       let { width, height } = page.getSize();
       let y = height - margin;
 
-      function addPage() {
-        page = pdfDoc.addPage();
-        ({ width, height } = page.getSize());
-        y = height - margin;
-      }
-
-      function ensureSpace(neededPx: number) {
-        if (y - neededPx < BOTTOM_LIMIT) addPage();
-      }
-
-      function drawLine(
-        text: string,
-        opts: { size: number; bold?: boolean; indent?: number } = {
-          size: 11,
+      const ensureSpace = (needed: number) => {
+        if (y - needed < margin) {
+          page = pdfDoc.addPage();
+          const size = page.getSize();
+          width = size.width;
+          height = size.height;
+          y = height - margin;
         }
-      ) {
-        const size = opts.size ?? 11;
-        const indent = opts.indent ?? 0;
+      };
 
-        ensureSpace(size + 6);
-
+      const drawLine = (text: string, size = 11, isBold = false) => {
+        ensureSpace(size + 8);
         page.drawText(text, {
-          x: margin + indent,
+          x: margin,
           y,
           size,
-          font: opts.bold ? fontBold : font,
+          font: isBold ? fontBold : font,
           color: rgb(0, 0, 0),
         });
+        y -= size + 8;
+      };
 
-        y -= size + 6;
-      }
+      const wrapText = (text: string, maxWidth: number, fontToUse: any, size: number) => {
+        const clean = String(text ?? "").replace(/\s+/g, " ").trim();
+        if (!clean) return [];
+
+        const words = clean.split(" ");
+        const lines: string[] = [];
+        let current = "";
+
+        for (const w of words) {
+          const test = current ? `${current} ${w}` : w;
+          const testWidth = fontToUse.widthOfTextAtSize(test, size);
+
+          if (testWidth <= maxWidth) {
+            current = test;
+          } else {
+            if (current) lines.push(current);
+            // palabra muy larga: cortarla
+            if (fontToUse.widthOfTextAtSize(w, size) > maxWidth) {
+              let chunk = "";
+              for (const ch of w) {
+                const testChunk = chunk + ch;
+                if (fontToUse.widthOfTextAtSize(testChunk, size) <= maxWidth) {
+                  chunk = testChunk;
+                } else {
+                  if (chunk) lines.push(chunk);
+                  chunk = ch;
+                }
+              }
+              current = chunk;
+            } else {
+              current = w;
+            }
+          }
+        }
+        if (current) lines.push(current);
+        return lines;
+      };
+
+      const drawWrappedBlock = (
+        title: string,
+        body: string,
+        opts?: { titleSize?: number; bodySize?: number }
+      ) => {
+        const titleSize = opts?.titleSize ?? 14;
+        const bodySize = opts?.bodySize ?? 11;
+
+        const maxWidth = width - margin * 2;
+
+        // título
+        ensureSpace(titleSize + 10);
+        page.drawText(title, {
+          x: margin,
+          y,
+          size: titleSize,
+          font: fontBold,
+          color: rgb(0, 0, 0),
+        });
+        y -= titleSize + 10;
+
+        const lines = wrapText(body, maxWidth, font, bodySize);
+        if (lines.length === 0) {
+          drawLine("—", bodySize, false);
+          return;
+        }
+
+        for (const ln of lines) {
+          ensureSpace(bodySize + 6);
+          page.drawText(ln, {
+            x: margin,
+            y,
+            size: bodySize,
+            font,
+            color: rgb(0, 0, 0),
+          });
+          y -= bodySize + 6;
+        }
+
+        y -= 6;
+      };
 
       // Logo
       try {
@@ -242,7 +304,6 @@ export default function AdminPage() {
         const logoHeight = (logoImage.height / logoImage.width) * logoWidth;
 
         ensureSpace(logoHeight + 10);
-
         page.drawImage(logoImage, {
           x: width - margin - logoWidth,
           y: y - logoHeight,
@@ -250,42 +311,57 @@ export default function AdminPage() {
           height: logoHeight,
         });
 
-        y -= logoHeight + 18;
+        y -= logoHeight + 14;
       } catch (e) {
         console.warn("No se pudo cargar el logo para el PDF:", e);
       }
 
-      // Título + datos generales
-      drawLine("Reporte diario de obra", { size: 18, bold: true });
-
-      const supervisorNombre =
-        reporte.supervisorNombre || reporte.supervisorId || "";
-      const fechaTexto = reporte.fecha || "";
-      const proyectoNombre = normalizeProyectoNombre(
-        (reporte as any).proyectoNombre
-      );
-
-      y -= 4;
-      drawLine(`Proyecto: ${proyectoNombre || "-"}`, { size: 12 });
-      drawLine(`Supervisor: ${supervisorNombre || "-"}`, { size: 12 });
-      drawLine(`Fecha: ${fechaTexto || "-"}`, { size: 12 });
-
+      // Header
+      drawLine("Reporte diario de obra", 18, true);
       y -= 6;
 
-      // Actividades
-      drawLine("Actividades del día:", { size: 14, bold: true });
+      const supervisorNombre = reporte.supervisorNombre || reporte.supervisorId || "";
+      const fechaTexto = reporte.fecha || "";
+      const proyectoNombre = normalizeProyectoNombre((reporte as any).proyectoNombre);
 
-      function drawList(label: string, items?: string[]) {
+      drawLine(`Proyecto: ${proyectoNombre || "-"}`, 12);
+      drawLine(`Supervisor: ${supervisorNombre || "-"}`, 12);
+      drawLine(`Fecha: ${fechaTexto || "-"}`, 12);
+
+      // ✅ Comentario general
+      if (reporte.comentarioGeneral && reporte.comentarioGeneral.trim()) {
+        y -= 6;
+        drawWrappedBlock("Comentario general:", reporte.comentarioGeneral);
+      }
+
+      // Actividades
+      y -= 4;
+      drawLine("Actividades del día:", 14, true);
+
+      const drawList = (label: string, items?: string[]) => {
         if (!items || items.length === 0) return;
 
-        drawLine(label, { size: 12, bold: true });
+        drawLine(label, 12, true);
 
         for (const item of items) {
-          drawLine(`• ${item}`, { size: 11, indent: 10 });
+          const maxWidth = width - margin * 2 - 10;
+          const lines = wrapText(`• ${item}`, maxWidth, font, 11);
+
+          for (const ln of lines) {
+            ensureSpace(11 + 6);
+            page.drawText(ln, {
+              x: margin + 10,
+              y,
+              size: 11,
+              font,
+              color: rgb(0, 0, 0),
+            });
+            y -= 11 + 6;
+          }
         }
 
-        y -= 4;
-      }
+        y -= 6;
+      };
 
       drawList("Fabricación:", reporte.actividadesFabricacion);
       drawList("Instalación:", reporte.actividadesInstalacion);
@@ -294,25 +370,19 @@ export default function AdminPage() {
       // Incidencias
       if (reporte.tiempoMuerto || reporte.pendiente) {
         y -= 2;
-        drawLine("Incidencias:", { size: 14, bold: true });
+        drawLine("Incidencias:", 14, true);
 
-        if (reporte.tiempoMuerto)
-          drawLine(`Tiempo muerto: ${reporte.tiempoMuerto}`, { size: 11 });
-        if (reporte.tiempoMuertoOtro)
-          drawLine(`Tiempo muerto (otro): ${reporte.tiempoMuertoOtro}`, {
-            size: 11,
-          });
+        if (reporte.tiempoMuerto) drawWrappedBlock("Tiempo muerto:", reporte.tiempoMuerto, { titleSize: 12, bodySize: 11 });
+        if (reporte.tiempoMuertoOtro) drawWrappedBlock("Tiempo muerto (otro):", reporte.tiempoMuertoOtro, { titleSize: 12, bodySize: 11 });
 
-        if (reporte.pendiente)
-          drawLine(`Pendiente: ${reporte.pendiente}`, { size: 11 });
-        if (reporte.pendienteOtro)
-          drawLine(`Pendiente (otro): ${reporte.pendienteOtro}`, { size: 11 });
+        if (reporte.pendiente) drawWrappedBlock("Pendiente:", reporte.pendiente, { titleSize: 12, bodySize: 11 });
+        if (reporte.pendienteOtro) drawWrappedBlock("Pendiente (otro):", reporte.pendienteOtro, { titleSize: 12, bodySize: 11 });
       }
 
       // Métricas
       if (reporte.metrics && reporte.metrics.length > 0) {
-        y -= 6;
-        drawLine("Métricas:", { size: 14, bold: true });
+        y -= 2;
+        drawLine("Métricas:", 14, true);
 
         for (const m of reporte.metrics as any[]) {
           const hasBorealShape = Boolean(m.codigo || m.medida);
@@ -332,8 +402,23 @@ export default function AdminPage() {
             line += JSON.stringify(m);
           }
 
-          drawLine(line, { size: 10 });
+          const maxWidth = width - margin * 2;
+          const lines = wrapText(line, maxWidth, font, 10);
+
+          for (const ln of lines) {
+            ensureSpace(10 + 6);
+            page.drawText(ln, {
+              x: margin,
+              y,
+              size: 10,
+              font,
+              color: rgb(0, 0, 0),
+            });
+            y -= 10 + 6;
+          }
         }
+
+        y -= 6;
       }
 
       // -----------------------------------------
@@ -390,14 +475,14 @@ export default function AdminPage() {
 
       const pdfBytes = await pdfDoc.save();
 
-      // ✅ FIX definitivo TS: Blob con Uint8Array
+      // ✅ FIX TS definitivo: Blob con Uint8Array (no ArrayBuffer)
       const blob = new Blob([new Uint8Array(pdfBytes)], {
         type: "application/pdf",
       });
 
-      const fileUrl = URL.createObjectURL(blob);
+      const outUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
-      link.href = fileUrl;
+      link.href = outUrl;
 
       const proyectoNombreForFile =
         normalizeProyectoNombre((reporte as any).proyectoNombre) || "reporte";
@@ -406,13 +491,14 @@ export default function AdminPage() {
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9]+/gi, "-");
+
       const safeFecha = (reporte.fecha || "").replace(/[^0-9-]/g, "");
 
       link.download = `reporte_${safeProyecto}_${safeFecha}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      URL.revokeObjectURL(fileUrl);
+      URL.revokeObjectURL(outUrl);
     } catch (error) {
       console.error("Error generando PDF:", error);
       alert("Hubo un error al generar el PDF.");
@@ -420,7 +506,7 @@ export default function AdminPage() {
   }
 
   // ----------------------------------------------------
-  // Pantalla de LOGIN (estilo)
+  // LOGIN
   // ----------------------------------------------------
   if (!loggedIn) {
     return (
@@ -456,7 +542,7 @@ export default function AdminPage() {
   }
 
   // ----------------------------------------------------
-  // Vista principal ADMIN (dashboard)
+  // DASHBOARD
   // ----------------------------------------------------
   return (
     <div className="min-h-screen bg-slate-50">
@@ -468,7 +554,7 @@ export default function AdminPage() {
               Dashboard de reportes
             </h1>
             <p className="text-sm text-slate-500">
-              Filtra por semana/año y revisa evidencias, métricas y exporta PDF.
+              Filtra por semana/año y revisa evidencias, métricas, comentario y exporta PDF.
             </p>
           </div>
 
@@ -526,9 +612,7 @@ export default function AdminPage() {
                 className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
                 value={selectedWeek ?? ""}
                 onChange={(e) =>
-                  setSelectedWeek(
-                    e.target.value ? Number(e.target.value) : null
-                  )
+                  setSelectedWeek(e.target.value ? Number(e.target.value) : null)
                 }
               >
                 <option value="">Todas</option>
@@ -549,9 +633,7 @@ export default function AdminPage() {
                 className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
                 value={selectedYear ?? ""}
                 onChange={(e) =>
-                  setSelectedYear(
-                    e.target.value ? Number(e.target.value) : null
-                  )
+                  setSelectedYear(e.target.value ? Number(e.target.value) : null)
                 }
               >
                 <option value="">Todos</option>
@@ -571,7 +653,7 @@ export default function AdminPage() {
               <input
                 type="text"
                 className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                placeholder="Buscar por proyecto, supervisor, fecha..."
+                placeholder="Buscar por proyecto, supervisor, fecha, comentario..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -598,9 +680,7 @@ export default function AdminPage() {
         {!loading && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {filteredReportes.map((r) => {
-              const proyectoNombre = normalizeProyectoNombre(
-                (r as any).proyectoNombre
-              );
+              const proyectoNombre = normalizeProyectoNombre((r as any).proyectoNombre);
 
               return (
                 <div
@@ -644,6 +724,17 @@ export default function AdminPage() {
                       <span>Fotos: {r.fotos?.length ?? 0}</span>
                       <span>Métricas: {r.metrics?.length ?? 0}</span>
                     </div>
+
+                    {r.comentarioGeneral?.trim() ? (
+                      <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-[11px] font-semibold text-slate-600">
+                          Comentario general
+                        </p>
+                        <p className="text-xs text-slate-700 mt-1 line-clamp-3 whitespace-pre-line">
+                          {r.comentarioGeneral}
+                        </p>
+                      </div>
+                    ) : null}
                   </div>
 
                   <button
@@ -681,7 +772,7 @@ export default function AdminPage() {
                 Detalle del reporte
               </h2>
               <p className="text-sm text-slate-500 mb-4">
-                Revisa actividades, métricas y evidencia.
+                Revisa actividades, métricas, comentario y evidencia.
               </p>
 
               {/* Datos base */}
@@ -701,11 +792,21 @@ export default function AdminPage() {
                 <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
                   <p className="text-xs text-slate-500">Proyecto</p>
                   <p className="text-sm font-semibold text-slate-900">
-                    {normalizeProyectoNombre(
-                      (selected as any).proyectoNombre
-                    ) || "—"}
+                    {normalizeProyectoNombre((selected as any).proyectoNombre) || "—"}
                   </p>
                 </div>
+              </div>
+
+              {/* ✅ Comentario general en bitácora */}
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 mb-4">
+                <p className="text-xs font-semibold text-slate-600">
+                  Comentario general
+                </p>
+                <p className="text-sm text-slate-800 mt-1 whitespace-pre-line">
+                  {selected.comentarioGeneral?.trim()
+                    ? selected.comentarioGeneral
+                    : "—"}
+                </p>
               </div>
 
               <div className="flex flex-wrap gap-2 mb-4">
@@ -789,7 +890,7 @@ export default function AdminPage() {
                           </>
                         )}
 
-                        {/* Torres */}
+                        {/* Torres 1000 / Saqqara */}
                         {hasTorresShape && (
                           <>
                             {m.categoria && (

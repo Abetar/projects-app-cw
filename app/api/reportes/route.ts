@@ -41,7 +41,6 @@ export async function POST(req: Request) {
       ? body.metrics
           .filter((r) => r && typeof r === "object")
           .map((r: any) => {
-            // si trae "cantidad", normalizamos a number si se puede
             if ("cantidad" in r) {
               const n = Number((r as any).cantidad);
               return { ...r, cantidad: Number.isFinite(n) ? n : 0 };
@@ -55,6 +54,10 @@ export async function POST(req: Request) {
       fecha: body.fecha,
       supervisorId: body.supervisorId,
       proyectoId: body.proyectoId,
+
+      // ✅ NUEVO
+      comentarioGeneral: body.comentarioGeneral ?? null,
+
       actividadesFabricacion: body.actividadesFabricacion ?? [],
       actividadesInstalacion: body.actividadesInstalacion ?? [],
       actividadesSupervision: body.actividadesSupervision ?? [],
@@ -66,16 +69,9 @@ export async function POST(req: Request) {
       metrics: safeMetrics,
     };
 
-    // 🧠 Llamamos a Airtable
     const newId = await createReporte(payload);
 
-    return NextResponse.json(
-      {
-        ok: true,
-        id: newId,
-      },
-      { status: 201 }
-    );
+    return NextResponse.json({ ok: true, id: newId }, { status: 201 });
   } catch (error) {
     console.error("Error en POST /api/reportes:", error);
     return NextResponse.json(
@@ -90,7 +86,7 @@ export async function POST(req: Request) {
 
 /**
  * GET /api/reportes
- * (Bonus) Lista todos los reportes para el panel admin.
+ * Lista todos los reportes para el panel admin.
  */
 export async function GET() {
   try {

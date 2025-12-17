@@ -169,8 +169,8 @@ type ReporteFields = {
   MetricsJson?: string;
   "Confirmado por supervisor"?: boolean;
 
-  // Ya no dependemos de un lookup aquí
-  // "Nombre supervisor"?: string;
+  // ✅ NUEVO
+  "Comentario general"?: string;
 };
 
 export type MetricsRow = Record<string, any>;
@@ -193,6 +193,9 @@ export type ReporteDiario = {
   pendienteOtro: string | null;
   fotos: string[];
   metrics: MetricsRow[];
+
+  // ✅ NUEVO
+  comentarioGeneral: string | null;
 };
 
 /**
@@ -203,6 +206,10 @@ export type CreateReportePayload = {
   fecha: string; // ISO (ej. 2025-12-10)
   supervisorId: string;
   proyectoId: string;
+
+  // ✅ NUEVO
+  comentarioGeneral?: string | null;
+
   actividadesFabricacion: string[];
   actividadesInstalacion: string[];
   actividadesSupervision: string[];
@@ -224,6 +231,10 @@ export async function createReporte(
           Fecha: payload.fecha,
           Supervisores: [payload.supervisorId],
           Proyectos: [payload.proyectoId],
+
+          // ✅ NUEVO (ojo al nombre exacto del campo en Airtable)
+          "Comentario general": payload.comentarioGeneral || undefined,
+
           "Fabricación – actividades": payload.actividadesFabricacion,
           "Instalación – actividades": payload.actividadesInstalacion,
           "Supervisión – actividades": payload.actividadesSupervision,
@@ -248,7 +259,7 @@ export async function createReporte(
     });
   } catch (err: any) {
     console.error("Airtable POST ERROR:", err);
-    throw err; // se regresa el error real hacia la API
+    throw err;
   }
 
   return data.records[0].id;
@@ -256,10 +267,6 @@ export async function createReporte(
 
 /**
  * Listar todos los reportes (para el panel admin y PDF)
- * Ahora:
- *  - Cargamos reportes
- *  - Cargamos supervisores
- *  - Creamos un mapa id → nombre
  */
 export async function listReportes(): Promise<ReporteDiario[]> {
   const [reportesData, supervisoresData] = await Promise.all([
@@ -309,6 +316,9 @@ export async function listReportes(): Promise<ReporteDiario[]> {
       pendienteOtro: f["Pendiente otro"] ?? null,
       fotos: (f.Fotos ?? []).map((att) => att.url),
       metrics,
+
+      // ✅ NUEVO
+      comentarioGeneral: f["Comentario general"] ?? null,
     };
   });
 }

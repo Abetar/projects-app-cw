@@ -3,7 +3,8 @@
 export type ProjectFormType =
   | "boreal_codigo_medida"
   | "torres_categoria_item"
-  | "saqqara_dropdown_qty";
+  | "saqqara_dropdown_qty"
+  | "avalon_checklist";
 
 /* ------------------ BOREAL ------------------ */
 
@@ -43,9 +44,25 @@ export type SaqqaraFormConfig = {
   items: SaqqaraItemDefinition[];
 };
 
+/* ------------------ AVALON ------------------ */
+
+export type AvalonItemDefinition = {
+  id: string;
+  label: string;
+};
+
+export type AvalonFormConfig = {
+  type: "avalon_checklist";
+  items: AvalonItemDefinition[];
+};
+
 /* --------------- UNIÓN GENERAL --------------- */
 
-export type ProjectFormConfig = BorealFormConfig | TorresFormConfig | SaqqaraFormConfig;
+export type ProjectFormConfig =
+  | BorealFormConfig
+  | TorresFormConfig
+  | SaqqaraFormConfig
+  | AvalonFormConfig;
 
 const SAQQARA_LABELS: string[] = [
   "Corte de tapas registro y soldadura posterior a trabajos de instalaciones por terceros en columnas de Estructura de Lobby.",
@@ -130,10 +147,12 @@ const SAQQARA_LABELS: string[] = [
   "Suministro e instalación de Tapas Con Medidas de 0.40ancho  x.05 ceja de precolado x 5.00 mts largo., de panel de aluminio en Lobby Exterior de Jardinera",
 ];
 
-const SAQQARA_ITEMS: SaqqaraItemDefinition[] = SAQQARA_LABELS.map((label, i) => ({
-  id: `SAQ_${String(i + 1).padStart(3, "0")}`,
-  label,
-}));
+const SAQQARA_ITEMS: SaqqaraItemDefinition[] = SAQQARA_LABELS.map(
+  (label, i) => ({
+    id: `SAQ_${String(i + 1).padStart(3, "0")}`,
+    label,
+  })
+);
 
 export const projectForms: Record<string, ProjectFormConfig> = {
   FORM_BOREAL: {
@@ -198,7 +217,10 @@ export const projectForms: Record<string, ProjectFormConfig> = {
         { id: "MAQUILA_CPB_60X115", label: "Maquila CPB 60x115" },
         { id: "TUBO_1X1_NAT_MATE_6_10", label: 'Tubo 1" x 1" nat. mate 6.10' },
         { id: "GUNTHER_CARTUCHO", label: "Gunther cartucho" },
-        { id: "MO_BASTIDOR_ARMADO_PEGADO", label: "M.O. bastidor armado y pegado" },
+        {
+          id: "MO_BASTIDOR_ARMADO_PEGADO",
+          label: "M.O. bastidor armado y pegado",
+        },
       ],
     },
   },
@@ -208,9 +230,36 @@ export const projectForms: Record<string, ProjectFormConfig> = {
     type: "saqqara_dropdown_qty",
     items: SAQQARA_ITEMS,
   },
+
+  FORM_AVALON: {
+    type: "avalon_checklist",
+    items: [
+      { id: "DETALLADO_N11", label: "Detallado N11" },
+      { id: "DETALLADO_N12", label: "Detallado N12" },
+      { id: "DETALLADO_N14", label: "Detallado N14" },
+      { id: "DETALLADO_N15", label: "Detallado N15" },
+      { id: "DETALLADO_N16", label: "Detallado N16" },
+      { id: "DETALLADO_N17", label: "Detallado N17" },
+      { id: "DETALLADO_N18", label: "Detallado N18" },
+      { id: "DETALLADO_N19", label: "Detallado N19" },
+      { id: "DETALLADO_N20", label: "Detallado N20" },
+      { id: "DETALLADO_N21", label: "Detallado N21" },
+      { id: "DETALLADO_N22", label: "Detallado N22" },
+      { id: "DETALLADO_N23", label: "Detallado N23" },
+      { id: "DETALLADO_N24", label: "Detallado N24" },
+      { id: "DETALLADO_N25", label: "Detallado N25" },
+      { id: "DETALLADO_N26", label: "Detallado N26" },
+      { id: "DETALLADO_N27", label: "Detallado N27" },
+
+      { id: "TAPAS_AMENIDADES", label: "Tapas amenidades" },
+      { id: "CIERRE_FACHADA_100", label: "Cierre de fachada 100%" },
+    ],
+  },
 };
 
-export function getProjectFormConfig(formKey: string | null): ProjectFormConfig | null {
+export function getProjectFormConfig(
+  formKey: string | null
+): ProjectFormConfig | null {
   if (!formKey) return null;
   return projectForms[formKey] ?? null;
 }
@@ -231,4 +280,10 @@ export function isSaqqaraFormConfig(
   config: ProjectFormConfig | null
 ): config is SaqqaraFormConfig {
   return !!config && config.type === "saqqara_dropdown_qty";
+}
+
+export function isAvalonFormConfig(
+  config: ProjectFormConfig | null
+): config is AvalonFormConfig {
+  return !!config && config.type === "avalon_checklist";
 }

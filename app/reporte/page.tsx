@@ -3,8 +3,7 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { MetricsRow } from "@/components/reporte/DynamicMetrics";
-import { DynamicMetrics } from "@/components/reporte/DynamicMetrics";
+import { MetricsRow, DynamicMetrics } from "@/components/reporte/DynamicMetrics";
 import type { Proyecto } from "@/lib/airtable";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
@@ -27,6 +26,12 @@ type CreateReportePayload = {
   pendienteOtro: string | null;
   fotos: string[];
   metrics: MetricsRow[];
+
+  // ✅ NUEVO: comentario general para todos los proyectos
+  comentarioGeneral?: string | null;
+
+  // (opcional) si en tu Airtable existe “Área o nivel” y lo quieres guardar:
+  area?: string | null;
 };
 
 const TIEMPO_MUERTO_OPCIONES = [
@@ -88,126 +93,9 @@ const ACTIVIDADES_SUPERVISION = [
 
 const MAX_FOTOS = 5;
 
-/* ---------------- SAQQARA (solo UI en /reporte) ---------------- */
-
-const SAQQARA_OPCIONES_LONG: string[] = [
-  "Corte de tapas registro y soldadura posterior a trabajos de instalaciones por terceros en columnas de Estructura de Lobby.",
-  "instalacion de angulo con aplicación de soldadura en perfil de estructura en pasillo acceso de torre a lobby de cristal.",
-  "instalacion de angulo con pijas en perfil de estructura en pasillo acceso de torre a lobby de cristal.",
-  "NIVEL 6       Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 7      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 8      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 9     Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 10      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 11     Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 12      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 14      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 15      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 16      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 17     Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 18    Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 19     Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 20      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 21      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 22      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 23      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 24     Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 25      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 26      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 27      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 28     Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 29      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 30      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 31      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 32      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 33      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 34      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 35      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 36     Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 37      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "NIVEL 38      Solera  de panel   dar  silver  en canceles   de balcones    de 3.10 x 0.075.",
-  "nivel 4     panel   en cancel pasillo elevador",
-  "nivel 5     panel   en cancel pasillo elevador",
-  "nivel 6     panel   en cancel pasillo elevador",
-  "nivel 7     panel   en cancel pasillo elevador",
-  "nivel 8    panel   en cancel pasillo elevador",
-  "nivel 9     panel   en cancel pasillo elevador",
-  "nivel 10     panel   en cancel pasillo elevador",
-  "nivel 11     panel   en cancel pasillo elevador",
-  "nivel 12     panel   en cancel pasillo elevador",
-  "nivel 14     panel   en cancel pasillo elevador",
-  "nivel 15     panel   en cancel pasillo elevador",
-  "nivel 16     panel   en cancel pasillo elevador",
-  "nivel 17     panel   en cancel pasillo elevador",
-  "nivel 18     panel   en cancel pasillo elevador",
-  "nivel 19     panel   en cancel pasillo elevador",
-  "nivel 20     panel   en cancel pasillo elevador",
-  "nivel 21     panel   en cancel pasillo elevador",
-  "nivel 22    panel   en cancel pasillo elevador",
-  "nivel 23     panel   en cancel pasillo elevador",
-  "nivel 24     panel   en cancel pasillo elevador",
-  "nivel 25     panel   en cancel pasillo elevador",
-  "nivel 26     panel   en cancel pasillo elevador",
-  "nivel 27    panel   en cancel pasillo elevador",
-  "nivel 28    panel   en cancel pasillo elevador",
-  "nivel 29    panel   en cancel pasillo elevador",
-  "nivel 30     panel   en cancel pasillo elevador",
-  "nivel 31    panel   en cancel pasillo elevador",
-  "nivel 32     panel   en cancel pasillo elevador",
-  "nivel 33     panel   en cancel pasillo elevador",
-  "nivel 34    panel   en cancel pasillo elevador",
-  "nivel 35     panel   en cancel pasillo elevador",
-  "nivel 36     panel   en cancel pasillo elevador",
-  "nivel 37     panel   en cancel pasillo elevador",
-  "nivel 38     panel   en cancel pasillo elevador",
-  "nivel 39     panel   en cancel pasillo elevador",
-  "sub  estructura       bloque 1        corona  lobby",
-  "sub  estructura       bloque 2       corona  lobby",
-  "forro de  panel  bloque  1            corona lobby",
-  "forro    de panel   bloque  2        corona  lobby",
-  "detallado                                          corona  lobby",
-  "Aplicación de Sello color negro en el contorno del piso y el cristal del lobby del cristal por interior 23 m   LOBBY",
-  "Suministro e Instalación de película esmerilada en cristales de puerta del pasillo lobby y en módulos de la zona de amenidades 6.25 m2",
-  "Apertura de huecos en plafon de lobby para instalacion de Spot luminarias De 20 cms.",
-  "Suministro e Instalación de panel color Dark Silver en pecheras exterior en Lobby Area de Asadores",
-  "Suministro e instalación de Tapas Con Medidas de 0.40ancho  x.05 ceja de precolado x 5.00 mts largo., de panel de aluminio en Lobby Exterior de Jardinera",
-];
-
 function normalizeOneLine(s: string) {
-  return String(s)
-    .replace(/\s+/g, " ")
-    .replace(/[.,]\s*$/, "")
-    .trim();
+  return String(s).replace(/\s+/g, " ").replace(/[.,]\s*$/, "").trim();
 }
-
-function shortenSaqqaraLabel(longText: string) {
-  const s = normalizeOneLine(longText);
-  const lower = s.toLowerCase();
-
-  // NIVEL X Solera ... 3.10 x 0.075
-  const mSolera = s.match(/^\s*nivel\s*(\d+)\s+solera.*?(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/i);
-  if (mSolera) {
-    const n = mSolera[1];
-    const a = mSolera[2];
-    const b = mSolera[3];
-    return `N${n} solera panel ${a}x${b}`;
-  }
-
-  // nivel X panel en cancel pasillo elevador
-  const mPanel = s.match(/^\s*nivel\s*(\d+)\s+panel\s+en\s+cancel\s+pasillo\s+elevador/i);
-  if (mPanel) {
-    return `N${mPanel[1]} panel cancel pasillo elevador`;
-  }
-
-  // fallback: recorte simple
-  if (s.length <= 70) return s;
-  return s.slice(0, 67) + "…";
-}
-
-type SaqqaraRowState = {
-  opcion: string; // valor REAL (texto largo)
-  cantidad: string;
-};
 
 export default function ReportePage() {
   const router = useRouter();
@@ -258,6 +146,9 @@ export default function ReportePage() {
   const [fecha, setFecha] = useState("");
   const [area, setArea] = useState("");
 
+  // ✅ NUEVO: Comentario general (aplica a todos los proyectos)
+  const [comentarioGeneral, setComentarioGeneral] = useState("");
+
   // Actividades separadas por categoría
   const [actividadesFabricacion, setActividadesFabricacion] = useState<string[]>(
     []
@@ -274,9 +165,7 @@ export default function ReportePage() {
     nombre: string
   ) => {
     const updater = (prev: string[]) =>
-      prev.includes(nombre)
-        ? prev.filter((a) => a !== nombre)
-        : [...prev, nombre];
+      prev.includes(nombre) ? prev.filter((a) => a !== nombre) : [...prev, nombre];
 
     if (categoria === "fabricacion") {
       setActividadesFabricacion(updater);
@@ -296,64 +185,6 @@ export default function ReportePage() {
   // Métricas dinámicas
   const [metrics, setMetrics] = useState<MetricsRow[]>([]);
 
-  // Saqqara (solo si formKey === "saqqara")
-  const isSaqqara = selectedProyecto?.formKey === "saqqara";
-  const [saqqaraRows, setSaqqaraRows] = useState<SaqqaraRowState[]>([
-    { opcion: "", cantidad: "" },
-  ]);
-
-  const saqqaraOptions = useMemo(
-    () =>
-      SAQQARA_OPCIONES_LONG.map((longText) => ({
-        value: normalizeOneLine(longText), // guardamos un string limpio
-        label: shortenSaqqaraLabel(longText),
-      })),
-    []
-  );
-
-  function updateSaqqaraParent(rows: SaqqaraRowState[]) {
-    const nextMetrics: MetricsRow[] = rows
-      .filter((r) => r.opcion && r.cantidad)
-      .map((r) => ({
-        categoria: "Saqqara",
-        itemId: r.opcion, // texto largo (limpio)
-        itemLabel: shortenSaqqaraLabel(r.opcion), // texto corto para UI/Admin/PDF si lo usas
-        cantidad: Number(r.cantidad),
-      }));
-
-    setMetrics(nextMetrics);
-  }
-
-  function handleSaqqaraChangeRow(
-    index: number,
-    field: keyof SaqqaraRowState,
-    value: string
-  ) {
-    const next = [...saqqaraRows];
-    next[index] = { ...next[index], [field]: value };
-    setSaqqaraRows(next);
-    updateSaqqaraParent(next);
-  }
-
-  function handleSaqqaraAddRow() {
-    const next = [...saqqaraRows, { opcion: "", cantidad: "" }];
-    setSaqqaraRows(next);
-    updateSaqqaraParent(next);
-  }
-
-  function handleSaqqaraRemoveRow(index: number) {
-    const next = saqqaraRows.filter((_, i) => i !== index);
-    const finalRows = next.length > 0 ? next : [{ opcion: "", cantidad: "" }];
-    setSaqqaraRows(finalRows);
-    updateSaqqaraParent(finalRows);
-  }
-
-  // Al cambiar de proyecto, limpiamos métricas (y filas saqqara) sin tocar nada más
-  useEffect(() => {
-    setMetrics([]);
-    setSaqqaraRows([{ opcion: "", cantidad: "" }]);
-  }, [selectedProyecto?.formKey]);
-
   // Fotos (urls Cloudinary)
   const [fotoUrls, setFotoUrls] = useState<string[]>([]);
   const [subiendoFotos, setSubiendoFotos] = useState(false);
@@ -367,8 +198,12 @@ export default function ReportePage() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
 
-  // ---------------- HANDLERS ----------------
+  // Al cambiar de proyecto, limpiamos métricas sin tocar nada más
+  useEffect(() => {
+    setMetrics([]);
+  }, [selectedProyecto?.formKey]);
 
+  // ---------------- HANDLERS ----------------
   async function handleUploadFotos(files: FileList | null) {
     if (!files || files.length === 0) return;
 
@@ -399,10 +234,7 @@ export default function ReportePage() {
 
         const res = await fetch(
           `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
-          {
-            method: "POST",
-            body: formData,
-          }
+          { method: "POST", body: formData }
         );
 
         if (!res.ok) {
@@ -427,15 +259,14 @@ export default function ReportePage() {
       );
     } finally {
       setSubiendoFotos(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
   function resetForm() {
     setFecha("");
     setArea("");
+    setComentarioGeneral("");
     setProyectoId("");
     setActividadesFabricacion([]);
     setActividadesInstalacion([]);
@@ -445,12 +276,9 @@ export default function ReportePage() {
     setPendiente("");
     setPendienteOtro("");
     setMetrics([]);
-    setSaqqaraRows([{ opcion: "", cantidad: "" }]);
     setFotoUrls([]);
     setConfirmado(false);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -489,6 +317,12 @@ export default function ReportePage() {
       pendienteOtro: pendiente === "Otro" ? pendienteOtro || null : null,
       fotos: fotoUrls,
       metrics,
+
+      // ✅ NUEVO
+      comentarioGeneral: comentarioGeneral.trim() ? normalizeOneLine(comentarioGeneral) : null,
+
+      // (opcional) si lo quieres guardar
+      area: area.trim() ? normalizeOneLine(area) : null,
     };
 
     setSending(true);
@@ -524,7 +358,6 @@ export default function ReportePage() {
   }
 
   // ---------------- RENDER ----------------
-
   if (!supervisor) {
     return (
       <main className="min-h-screen flex items-center justify-center bg-slate-100 px-4">
@@ -549,7 +382,7 @@ export default function ReportePage() {
             </p>
           </div>
 
-          {/* ALERTAS BONITAS */}
+          {/* ALERTAS */}
           {errorMsg && (
             <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs sm:text-sm text-red-800 flex gap-2">
               <span className="text-lg">⚠️</span>
@@ -601,9 +434,7 @@ export default function ReportePage() {
                   required
                 >
                   <option value="">
-                    {loadingProyectos
-                      ? "Cargando proyectos…"
-                      : "Selecciona un proyecto"}
+                    {loadingProyectos ? "Cargando proyectos…" : "Selecciona un proyecto"}
                   </option>
                   {proyectos.map((p) => (
                     <option key={p.id} value={p.id}>
@@ -618,94 +449,102 @@ export default function ReportePage() {
                   Área o nivel
                 </label>
                 <Input
-                  placeholder="Ej. Nivel 5, Fachada norte…"
+                  placeholder="Ej. N11 / Fachada / Amenidades…"
                   value={area}
                   onChange={(e) => setArea(e.target.value)}
                 />
               </div>
+
+              {/* ✅ NUEVO: Comentario general */}
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-600">
+                  Comentario general
+                </label>
+                <textarea
+                  className="w-full min-h-[96px] rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                  placeholder="Comentario general del día (aplica a cualquier proyecto)…"
+                  value={comentarioGeneral}
+                  onChange={(e) => setComentarioGeneral(e.target.value)}
+                />
+                <p className="text-[11px] text-slate-500">
+                  Este comentario se guarda en el reporte sin importar el proyecto seleccionado.
+                </p>
+              </div>
             </div>
 
-            {/* ACTIVIDADES COMO PÍLDORAS */}
-            <div className="space-y-3 border-t border-slate-200 pt-4">
-              <h2 className="text-sm font-semibold text-slate-800">
-                Actividades del día *
-              </h2>
-              <p className="text-xs text-slate-500">
-                Toca cada actividad para marcarla o desmarcarla.
-              </p>
+            {/* ACTIVIDADES */}
+            <div className="pt-2 border-t border-slate-200 space-y-4">
+              <h2 className="text-sm font-semibold text-slate-800">Actividades</h2>
 
-              {/* FABRICACIÓN */}
+              {/* Fabricación */}
               <div className="space-y-2">
-                <p className="text-xs font-semibold text-slate-700">
-                  Fabricación
-                </p>
+                <p className="text-xs font-semibold text-slate-600">Fabricación</p>
                 <div className="flex flex-wrap gap-2">
-                  {ACTIVIDADES_FABRICACION.map((act) => {
-                    const checked = actividadesFabricacion.includes(act);
+                  {ACTIVIDADES_FABRICACION.map((a) => {
+                    const active = actividadesFabricacion.includes(a);
                     return (
                       <button
-                        key={act}
+                        key={a}
                         type="button"
-                        onClick={() => toggleActividad("fabricacion", act)}
-                        className={`text-xs sm:text-sm rounded-full border px-3 py-1 ${
-                          checked
-                            ? "bg-sky-600 border-sky-600 text-white"
-                            : "bg-slate-50 border-slate-300 text-slate-700"
-                        }`}
+                        onClick={() => toggleActividad("fabricacion", a)}
+                        className={[
+                          "text-xs rounded-full border px-3 py-1.5 transition",
+                          active
+                            ? "bg-slate-900 text-white border-slate-900"
+                            : "bg-white text-slate-700 border-slate-200 hover:border-sky-300 hover:bg-sky-50",
+                        ].join(" ")}
                       >
-                        {act}
+                        {a}
                       </button>
                     );
                   })}
                 </div>
               </div>
 
-              {/* INSTALACIÓN */}
+              {/* Instalación */}
               <div className="space-y-2">
-                <p className="text-xs font-semibold text-slate-700">
-                  Instalación
-                </p>
+                <p className="text-xs font-semibold text-slate-600">Instalación</p>
                 <div className="flex flex-wrap gap-2">
-                  {ACTIVIDADES_INSTALACION.map((act) => {
-                    const checked = actividadesInstalacion.includes(act);
+                  {ACTIVIDADES_INSTALACION.map((a) => {
+                    const active = actividadesInstalacion.includes(a);
                     return (
                       <button
-                        key={act}
+                        key={a}
                         type="button"
-                        onClick={() => toggleActividad("instalacion", act)}
-                        className={`text-xs sm:text-sm rounded-full border px-3 py-1 ${
-                          checked
-                            ? "bg-sky-600 border-sky-600 text-white"
-                            : "bg-slate-50 border-slate-300 text-slate-700"
-                        }`}
+                        onClick={() => toggleActividad("instalacion", a)}
+                        className={[
+                          "text-xs rounded-full border px-3 py-1.5 transition",
+                          active
+                            ? "bg-slate-900 text-white border-slate-900"
+                            : "bg-white text-slate-700 border-slate-200 hover:border-sky-300 hover:bg-sky-50",
+                        ].join(" ")}
                       >
-                        {act}
+                        {a}
                       </button>
                     );
                   })}
                 </div>
               </div>
 
-              {/* SUPERVISIÓN */}
+              {/* Supervisión */}
               <div className="space-y-2">
-                <p className="text-xs font-semibold text-slate-700">
-                  Supervisión
-                </p>
+                <p className="text-xs font-semibold text-slate-600">Supervisión</p>
                 <div className="flex flex-wrap gap-2">
-                  {ACTIVIDADES_SUPERVISION.map((act) => {
-                    const checked = actividadesSupervision.includes(act);
+                  {ACTIVIDADES_SUPERVISION.map((a) => {
+                    const active = actividadesSupervision.includes(a);
                     return (
                       <button
-                        key={act}
+                        key={a}
                         type="button"
-                        onClick={() => toggleActividad("supervision", act)}
-                        className={`text-xs sm:text-sm rounded-full border px-3 py-1 ${
-                          checked
-                            ? "bg-sky-600 border-sky-600 text-white"
-                            : "bg-slate-50 border-slate-300 text-slate-700"
-                        }`}
+                        onClick={() => toggleActividad("supervision", a)}
+                        className={[
+                          "text-xs rounded-full border px-3 py-1.5 transition",
+                          active
+                            ? "bg-slate-900 text-white border-slate-900"
+                            : "bg-white text-slate-700 border-slate-200 hover:border-sky-300 hover:bg-sky-50",
+                        ].join(" ")}
                       >
-                        {act}
+                        {a}
                       </button>
                     );
                   })}
@@ -714,104 +553,23 @@ export default function ReportePage() {
             </div>
 
             {/* MÉTRICAS */}
-            <div className="pt-2 border-t border-slate-200">
-              {!isSaqqara ? (
-                <DynamicMetrics
-                  formKey={selectedProyecto?.formKey ?? null}
-                  onChange={setMetrics}
-                />
-              ) : (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-slate-800">
-                      Métricas – Proyecto Saqqara
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      Elige una opción y captura la cantidad.
-                    </p>
-                  </div>
+            <div className="pt-2 border-t border-slate-200 space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-slate-800">Métricas</h2>
+                <p className="text-xs text-slate-500">
+                  Se ajustan automáticamente según el proyecto.
+                </p>
+              </div>
 
-                  <div className="space-y-2">
-                    {saqqaraRows.map((row, index) => (
-                      <div
-                        key={index}
-                        className="grid grid-cols-1 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto] gap-2 items-start bg-slate-50 rounded-xl px-3 py-3"
-                      >
-                        <div className="space-y-1">
-                          <label className="block text-xs font-medium text-slate-600">
-                            Opción
-                          </label>
-                          <select
-                            className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                            value={row.opcion}
-                            onChange={(e) =>
-                              handleSaqqaraChangeRow(
-                                index,
-                                "opcion",
-                                e.target.value
-                              )
-                            }
-                          >
-                            <option value="">Selecciona una opción…</option>
-                            {saqqaraOptions.map((opt) => (
-                              <option key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div className="space-y-1">
-                          <label className="block text-xs font-medium text-slate-600">
-                            Cantidad
-                          </label>
-                          <Input
-                            type="number"
-                            min={0}
-                            value={row.cantidad}
-                            onChange={(e) =>
-                              handleSaqqaraChangeRow(
-                                index,
-                                "cantidad",
-                                e.target.value
-                              )
-                            }
-                            placeholder="0"
-                          />
-                        </div>
-
-                        <div className="flex gap-2 pt-6 justify-end">
-                          {saqqaraRows.length > 1 && (
-                            <Button
-                              type="button"
-                              className="h-8 w-8 rounded-lg bg-red-700/10 border border-red-200 text-red-700 text-lg font-bold flex items-center justify-center hover:bg-red-200"
-                              onClick={() => handleSaqqaraRemoveRow(index)}
-                            >
-                              −
-                            </Button>
-                          )}
-                          {index === saqqaraRows.length - 1 && (
-                            <Button
-                              type="button"
-                              className="h-8 w-8 rounded-lg bg-green-600 text-white text-lg font-bold flex items-center justify-center hover:bg-green-700"
-                              onClick={handleSaqqaraAddRow}
-                            >
-                              +
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <DynamicMetrics
+                formKey={selectedProyecto?.formKey ?? null}
+                onChange={setMetrics}
+              />
             </div>
 
             {/* INCIDENCIAS */}
             <div className="pt-2 border-t border-slate-200 space-y-4">
-              <h2 className="text-sm font-semibold text-slate-800">
-                Incidencias
-              </h2>
+              <h2 className="text-sm font-semibold text-slate-800">Incidencias</h2>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Tiempo muerto */}
@@ -876,8 +634,7 @@ export default function ReportePage() {
                 Evidencia fotográfica *
               </h2>
               <p className="text-xs text-slate-500">
-                Sube hasta {MAX_FOTOS} fotos del día (panorámicas, detalles,
-                avances y pendientes).
+                Sube hasta {MAX_FOTOS} fotos del día (panorámicas, detalles, avances y pendientes).
               </p>
 
               <label className="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-xl px-4 py-6 text-center cursor-pointer hover:border-sky-500 hover:bg-sky-50 transition">
@@ -898,9 +655,7 @@ export default function ReportePage() {
               </label>
 
               {subiendoFotos && (
-                <p className="text-xs text-slate-500">
-                  Subiendo fotos, espera un momento…
-                </p>
+                <p className="text-xs text-slate-500">Subiendo fotos, espera un momento…</p>
               )}
 
               {fotoUrls.length > 0 && (
@@ -930,9 +685,7 @@ export default function ReportePage() {
                   checked={confirmado}
                   onChange={(e) => setConfirmado(e.target.checked)}
                 />
-                <span>
-                  Confirmo que la información capturada es real y verificable.
-                </span>
+                <span>Confirmo que la información capturada es real y verificable.</span>
               </label>
             </div>
 

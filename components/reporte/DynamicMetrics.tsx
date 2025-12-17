@@ -7,6 +7,7 @@ import {
   isBorealFormConfig,
   isTorresFormConfig,
   isSaqqaraFormConfig,
+  isAvalonFormConfig,
   TorresItemDefinition,
   BorealFormConfig,
   TorresFormConfig,
@@ -96,6 +97,11 @@ export function DynamicMetrics({ formKey, onChange }: Props) {
   const [saqqaraRows, setSaqqaraRows] = useState<SaqqaraRowState[]>([
     { itemId: "", cantidad: "" },
   ]);
+
+  // ✅ Avalon: checklist (cantidad siempre 1)
+  const [avalonChecked, setAvalonChecked] = useState<Record<string, boolean>>(
+    {}
+  );
 
   if (!formKey || !config) {
     return (
@@ -543,6 +549,97 @@ export function DynamicMetrics({ formKey, onChange }: Props) {
               </div>
             </div>
           ))}
+        </div>
+      </div>
+    );
+  }
+
+  /* ------------ AVALON (checklist, cantidad = 1) ------------ */
+
+  if (isAvalonFormConfig(config)) {
+    const items = config.items;
+
+    function updateParent(nextState: Record<string, boolean>) {
+      const metrics: MetricsRow[] = items
+        .filter((it) => nextState[it.id])
+        .map((it) => ({
+          itemId: it.id,
+          itemLabel: it.label,
+          cantidad: 1,
+        }));
+
+      onChange(metrics);
+    }
+
+    function toggle(id: string) {
+      const next = { ...avalonChecked, [id]: !avalonChecked[id] };
+      setAvalonChecked(next);
+      updateParent(next);
+    }
+
+    function clearAll() {
+      setAvalonChecked({});
+      onChange([]); // ✅ importante para no dejar residuos en el padre
+    }
+
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-800">
+              Métricas – Proyecto Avalon
+            </h3>
+            <p className="text-xs text-slate-500">
+              Marca lo realizado (la cantidad siempre es 1).
+            </p>
+          </div>
+
+          <Button
+            type="button"
+            className="h-9 rounded-xl bg-slate-900 text-white px-3 text-xs font-semibold hover:bg-slate-800"
+            onClick={clearAll}
+          >
+            Limpiar
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {items.map((it) => {
+            const checked = !!avalonChecked[it.id];
+
+            return (
+              <button
+                key={it.id}
+                type="button"
+                onClick={() => toggle(it.id)}
+                className={clsx(
+                  "flex items-center justify-between gap-3 rounded-xl border px-3 py-3 text-left",
+                  "transition hover:shadow-sm",
+                  checked
+                    ? "border-emerald-300 bg-emerald-50"
+                    : "border-slate-200 bg-white"
+                )}
+              >
+                <div>
+                  <p className="text-sm font-medium text-slate-900">
+                    {it.label}
+                  </p>
+                  <p className="text-xs text-slate-500">{it.id}</p>
+                </div>
+
+                <span
+                  className={clsx(
+                    "h-6 w-6 rounded-md border flex items-center justify-center text-sm font-bold",
+                    checked
+                      ? "bg-emerald-600 border-emerald-600 text-white"
+                      : "bg-white border-slate-300 text-transparent"
+                  )}
+                >
+                  ✓
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
     );
